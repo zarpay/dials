@@ -52,6 +52,13 @@ module Dials
 
       validates :key, presence: true
       validates :action, presence: true, inclusion: { in: %w[set clear] }
+
+      # App-level append-only: a persisted change refuses update and destroy
+      # through ActiveRecord. (Raw SQL and delete_all can still bypass this —
+      # rows are history AND the cache's version counter, so don't.)
+      def readonly?
+        persisted?
+      end
     end
   end
 end

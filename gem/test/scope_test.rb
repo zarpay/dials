@@ -22,6 +22,11 @@ class ScopeTest < Minitest::Test
     assert_equal({ market: "KE" }, Dials::Scope.parse(canonical))
   end
 
+  def test_parse_rejects_json_that_is_not_an_object
+    assert_raises(Dials::InvalidScope) { Dials::Scope.parse("42") }
+    assert_raises(Dials::InvalidScope) { Dials::Scope.parse("[]") }
+  end
+
   def test_exact_requires_every_dimension
     error = assert_raises(Dials::InvalidScope) do
       Dials::Scope.validate!(multi, { market: "KE" }, exact: true)
@@ -63,5 +68,29 @@ class ScopeTest < Minitest::Test
     open = Dials::Definition.new(:o, 1, type: :integer, variants: [:tenant])
     assert_equal({ tenant: "acme" }, Dials::Scope.validate!(open, { tenant: "acme" }, exact: true))
     assert_raises(Dials::InvalidScope) { Dials::Scope.validate!(open, { tenant: "" }, exact: true) }
+  end
+
+  def test_open_dimension_values_are_length_capped
+    open = Dials::Definition.new(:o, 1, type: :integer, variants: [:tenant])
+    at_limit = "a" * Dials::Dimension::MAX_VALUE_LENGTH
+    assert_equal({ tenant: at_limit }, Dials::Scope.validate!(open, { tenant: at_limit }, exact: true))
+    assert_raises(Dials::InvalidScope) do
+      Dials::Scope.validate!(open, { tenant: "#{at_limit}x" }, exact: true)
+    end
+  end
+
+  def test_canonical_scope_is_byte_capped_for_the_indexed_column
+    two_dims = Dials::Definition.new(:t, 1, type: :integer, variants: %i[tenant region])
+    long = "a" * Dials::Dimension::MAX_VALUE_LENGTH
+    scope = Dials::Scope.validate!(two_dims, { tenant: long, region: long }, exact: true)
+    error = assert_raises(Dials::InvalidScope) { Dials::Scope.canonical(scope) }
+    assert_match(/exceeds 255 bytes/, error.message)
+  end
+
+  def test_conflicting_key_spellings_raise
+    error = assert_raises(Dials::InvalidScope) do
+      Dials::Scope.normalize({ "market" => "KE", market: "NG" })
+    end
+    assert_match(/more than once/, error.message)
   end
 end

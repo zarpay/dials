@@ -4,6 +4,7 @@ require "json"
 
 require_relative "dials/version"
 require_relative "dials/errors"
+require_relative "dials/freeze"
 require_relative "dials/dimension"
 require_relative "dials/definition"
 require_relative "dials/registry"
@@ -28,12 +29,19 @@ require_relative "dials/testing"
 # Declarations live in code (Dials.define); values live in a store; reads
 # come from a per-process cache. Every write is attributed and logged.
 module Dials
+  # Thread-local marker: this thread performed a dial write inside a
+  # database transaction that is still open. While set, the thread's reads
+  # come from fresh, UNPUBLISHED snapshots — it sees its own uncommitted
+  # write, but the uncommitted value never lands in the shared cache (where
+  # other threads would read it, and where it would survive a rollback).
+  TXN_WRITE_KEY = :dials_wrote_in_open_transaction
+
+  CACHE_LOCK = Mutex.new
+
   class << self
     # -- declaration ---------------------------------------------------------
 
-    def registry
-      @registry ||= Registry.new
-    end
+    attr_reader :registry, :config
 
     # Declare dials:
     #
@@ -48,10 +56,6 @@ module Dials
 
     # -- configuration -------------------------------------------------------
 
-    def config
-      @config ||= Config.new
-    end
-
     def configure
       yield config
     end
@@ -61,17 +65,20 @@ module Dials
     end
 
     def cache
-      @cache ||= Cache.new(store: store, ttl: config.cache_ttl)
+      @cache || CACHE_LOCK.synchronize { @cache ||= Cache.new(store: store, ttl: config.cache_ttl) }
     end
 
     # Discard the cache object entirely (used when the store is swapped).
     def reset_cache!
-      @cache = nil
+      CACHE_LOCK.synchronize { @cache = nil }
     end
 
     # Force the next read to rebuild from the store — e.g. after writing
-    # through a console in another process, or in a test.
+    # through a console in another process, or in a test. Also clears this
+    # thread's in-transaction-write marker (test suites that wrap examples
+    # in transactions call this between examples).
     def reload!
+      Thread.current[TXN_WRITE_KEY] = nil
       cache.bust!
     end
 
@@ -94,7 +101,7 @@ module Dials
       pinned = Testing.override_for(definition.key)
       return pinned.first if pinned
 
-      Resolver.resolve(definition, normalized, cache.snapshot)
+      Resolver.resolve(definition, normalized, current_snapshot)
     end
 
     # The full change log, newest first. `key:` filters to one dial.
@@ -123,7 +130,7 @@ module Dials
         store.set_variation(definition.key, Scope.canonical(normalized), value, actor_attrs)
       end
 
-      cache.bust!
+      after_write
       value
     end
 
@@ -143,10 +150,51 @@ module Dials
           store.clear_variation(definition.key, Scope.canonical(normalized), actor_attrs)
         end
 
-      cache.bust!
+      after_write
       removed
     end
+
+    private
+
+    def after_write
+      cache.bust!
+      return unless store_transaction_open?
+
+      # The write is inside an application transaction and not committed
+      # yet. Two things follow. This thread's reads must bypass the shared
+      # cache until the transaction closes (see current_snapshot). And the
+      # bust above happened PRE-commit — another thread can legitimately
+      # republish the pre-transaction state before the commit lands — so the
+      # cache must be busted again ON commit, or a writer that never reads
+      # again would leave every process serving the old value until the TTL
+      # probe notices (forever, with ttl = nil). On rollback the hook is
+      # discarded: the shared cache never held the transaction's data.
+      Thread.current[TXN_WRITE_KEY] = true
+      store.after_commit { cache.bust! } if store.respond_to?(:after_commit)
+    end
+
+    def current_snapshot
+      if Thread.current[TXN_WRITE_KEY]
+        return cache.uncached_snapshot if store_transaction_open?
+
+        # The transaction closed (committed or rolled back). Rejoin the
+        # shared cache, busting first so the next snapshot reflects the
+        # outcome rather than anything published mid-transaction.
+        Thread.current[TXN_WRITE_KEY] = nil
+        cache.bust!
+      end
+
+      cache.snapshot
+    end
+
+    def store_transaction_open?
+      s = store
+      s.respond_to?(:transaction_open?) && s.transaction_open?
+    end
   end
+
+  @registry = Registry.new
+  @config = Config.new
 end
 
 begin
@@ -154,4 +202,8 @@ begin
   require_relative "dials/railtie"
 rescue LoadError
   nil
+rescue StandardError => e
+  # A broken or incompatible Rails installation must not stop the core gem
+  # from loading — Rails integration is opportunistic, never required.
+  warn "[dials] skipping Rails integration (#{e.class}: #{e.message})"
 end

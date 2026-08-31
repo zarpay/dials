@@ -117,6 +117,22 @@ the flag: declaring `variants:` is the gate, and the recommended
 registry-integrity spec makes arming a visible diff. Global-only dials fall
 out for free: no declaration, no variations, no flag.
 
+## Validation happens at write time, not read time
+
+Type and bounds are enforced when a value is stored (and on every code
+default at boot). Already-stored values are **not** re-validated on read:
+if a deploy narrows a dial's bounds from `0..1000` to `0..100`, a stored
+`900` keeps serving until an operator changes it. This is deliberate.
+Read-time enforcement has no good failure mode — rejecting the stored value
+mid-request means either raising (an incident caused by a deploy that
+changed no values) or silently substituting the default (exactly the kind
+of guess this gem refuses to make). The honest contract: narrowing a
+declaration is a migration, and the deploy that narrows bounds should check
+`Dials.changes` / the stored overrides for now-out-of-bounds values and fix
+them explicitly. What read-time *does* defend is robustness, not policy:
+rows corrupted around the gem are quarantined with a warning rather than
+taking down every dial read.
+
 ## Errors, not fallbacks, at the boundaries
 
 Unknown dial, missing dimension, unknown dimension, out-of-options value,

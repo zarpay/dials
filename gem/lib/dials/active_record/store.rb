@@ -5,34 +5,85 @@ module Dials
     # The production store: three ActiveRecord-backed tables (see
     # Dials::ActiveRecord::Setting / Variation / Change). Implements the same
     # interface as Stores::Memory; every mutation runs in a transaction with
-    # its change-log row, so the version counter (max change id) can never
-    # run ahead of or behind the data it stamps.
+    # its change-log row, so the version can never run ahead of or behind the
+    # data it stamps.
     class ActiveRecordStore
       Setting = Dials::ActiveRecord::Setting
       Variation = Dials::ActiveRecord::Variation
       Change = Dials::ActiveRecord::Change
 
+      # Sentinel for "this row could not be decoded; skip it".
+      SKIP = Object.new
+
+      # Database races a write can lose and safely re-run once: two processes
+      # creating the same parent row (RecordNotUnique), a clear destroying a
+      # parent while a concurrent set inserts a variation (InvalidForeignKey),
+      # and adapter-reported deadlocks / serialization failures
+      # (TransactionRollbackError covers both).
+      RETRYABLE = [
+        ::ActiveRecord::RecordNotUnique,
+        ::ActiveRecord::InvalidForeignKey,
+        ::ActiveRecord::TransactionRollbackError
+      ].freeze
+
       def state
         # Version first: if a write lands between these reads, the snapshot
         # carries an older version than its data, and the next probe sees the
         # version move and rebuilds — stale in the safe direction only.
-        version = Change.maximum(:id) || 0
+        current_version = version
 
-        globals = Setting.where.not(value: nil).pluck(:key, :value)
-                         .to_h { |key, value| [key.to_sym, decode(value)] }
+        globals = {}
+        Setting.where.not(value: nil).pluck(:key, :value).each do |key, raw|
+          value = decode_row(raw, "dials(#{key})")
+          globals[key.to_sym] = value unless value.equal?(SKIP)
+        end
 
         variations = {}
         Variation.joins(:setting)
                  .pluck("#{Setting.table_name}.key", "#{Variation.table_name}.scope", "#{Variation.table_name}.value")
-                 .each do |key, scope, value|
-          (variations[key.to_sym] ||= {})[scope] = decode(value)
+                 .each do |key, scope, raw|
+          value = decode_row(raw, "dial_variations(#{key}, #{scope})")
+          next if value.equal?(SKIP) || !valid_scope_string?(key, scope)
+
+          (variations[key.to_sym] ||= {})[scope] = value
         end
 
-        { globals: globals, variations: variations, version: version }
+        { globals: globals, variations: variations, version: current_version }
       end
 
+      # The change log is append-only, so its row count moves on every
+      # committed write and only ever grows. Count alone would be enough;
+      # max id is included as a belt against direct log surgery. Max id
+      # alone would NOT be enough: transaction A can claim id 10, B claim
+      # and commit id 11, and only then A commits — MAX(id) never moves for
+      # a process that already saw 11, so A's write would stay invisible
+      # until the next unrelated write. Count catches it (N → N+1).
       def version
-        Change.maximum(:id) || 0
+        [Change.count, Change.maximum(:id) || 0]
+      end
+
+      # True when the current thread's connection is inside an open
+      # transaction (typically an application transaction wrapping a
+      # Dials.set). The facade uses this to keep uncommitted dial state out
+      # of the shared cache.
+      def transaction_open?
+        pool = Setting.connection_pool
+        return false unless pool.active_connection?
+
+        connection = pool.respond_to?(:lease_connection) ? pool.lease_connection : pool.connection
+        connection.transaction_open?
+      end
+
+      # Runs the block after the current application transaction commits
+      # (immediately when no transaction is open). Discarded on rollback.
+      # The AR >= 7.2 floor enforced at require time guarantees the hook
+      # exists.
+      def after_commit(&)
+        if transaction_open?
+          ::ActiveRecord.after_all_transactions_commit(&)
+        else
+          yield
+        end
       end
 
       def set_global(key, value, actor)
@@ -46,7 +97,7 @@ module Dials
       end
 
       def clear_global(key, actor)
-        Setting.transaction do
+        transaction_with_retry do
           setting = Setting.find_by(key: key.to_s)
           next false if setting.nil? || setting.value.nil?
 
@@ -73,7 +124,7 @@ module Dials
       end
 
       def clear_variation(key, canonical_scope, actor)
-        Setting.transaction do
+        transaction_with_retry do
           setting = Setting.find_by(key: key.to_s)
           variation = setting&.variations&.find_by(scope: canonical_scope)
           next false if variation.nil?
@@ -92,7 +143,7 @@ module Dials
       def changes(key: nil, limit: 50)
         relation = Change.order(id: :desc).limit(limit)
         relation = relation.where(key: key.to_s) if key
-        relation.map do |row|
+        relation.filter_map do |row|
           ChangeRecord.new(
             key: row.key.to_sym,
             scope: row.scope && Scope.parse(row.scope),
@@ -104,6 +155,12 @@ module Dials
             actor_label: row.actor_label,
             created_at: row.created_at
           )
+        rescue StandardError => e
+          # Same quarantine rule as state: one corrupt row (written around
+          # the gem) must not take down the whole history listing — whether
+          # the value fails to parse or the scope parses to a non-object.
+          quarantine("dial_changes(id #{row.id})", "row does not decode (#{e.class})")
+          nil
         end
       end
 
@@ -122,15 +179,18 @@ module Dials
         )
       end
 
-      # Two processes creating the same parent row race on the unique key
-      # index; the loser retries once and finds the winner's row.
+      # One retry, and only when we are NOT inside an application
+      # transaction: after a failure there, the outer transaction is in an
+      # aborted state (PostgreSQL) and re-running statements would fail
+      # differently — the error must propagate to whoever owns that
+      # transaction.
       def transaction_with_retry(&)
         attempts = 0
         begin
           Setting.transaction(&)
-        rescue ::ActiveRecord::RecordNotUnique
+        rescue *RETRYABLE
           attempts += 1
-          retry if attempts == 1
+          retry if attempts == 1 && !transaction_open?
           raise
         end
       end
@@ -144,6 +204,39 @@ module Dials
       # (boolean, integer, float, string) round-trip exactly.
       def decode(raw)
         JSON.parse(raw)
+      end
+
+      # Rows written around the gem (console surgery, bad imports) must not
+      # take down every dial read in the process: a row that does not decode
+      # to a legal stored value is skipped with a warning, and every other
+      # dial keeps resolving.
+      def decode_row(raw, where)
+        value = decode(raw)
+        if value.nil?
+          quarantine(where, "stored value is JSON null")
+          return SKIP
+        end
+
+        value
+      rescue JSON::ParserError
+        quarantine(where, "stored value is not valid JSON")
+        SKIP
+      end
+
+      def valid_scope_string?(key, scope)
+        parsed = JSON.parse(scope)
+        return true if parsed.is_a?(Hash) && !parsed.empty?
+
+        quarantine("dial_variations(#{key})", "scope #{scope.inspect} is not a non-empty JSON object")
+        false
+      rescue JSON::ParserError
+        quarantine("dial_variations(#{key})", "scope #{scope.inspect} is not valid JSON")
+        false
+      end
+
+      def quarantine(where, reason)
+        warn "[dials] skipping corrupt row in #{where}: #{reason} (fix or delete the row; it was not written through Dials.set)"
+        nil
       end
     end
   end

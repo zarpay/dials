@@ -15,22 +15,10 @@ module Dials
     attr_reader :globals, :variations, :version
 
     def initialize(globals:, variations:, version:)
-      @globals = deep_freeze(globals)
-      @variations = deep_freeze(variations)
+      @globals = Freeze.deep(globals)
+      @variations = Freeze.deep(variations)
       @version = version
       freeze
-    end
-
-    private
-
-    def deep_freeze(object)
-      case object
-      when Hash
-        object.each { |k, v| deep_freeze(k) && deep_freeze(v) }
-      when Array
-        object.each { |v| deep_freeze(v) }
-      end
-      object.freeze
     end
   end
 

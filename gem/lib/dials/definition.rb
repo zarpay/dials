@@ -29,7 +29,16 @@ module Dials
       @dimensions = build_dimensions(variants)
       @default = default
 
+      # Validate BEFORE freezing: a default that fails validation (including
+      # a cyclic structure, which the JSON round-trip rejects) must raise
+      # InvalidDefinition without having frozen the caller's object — and
+      # Freeze.deep would recurse forever on a cycle.
       validate_definition!
+
+      # Deep-frozen: resolution returns the default directly when nothing is
+      # stored, and a caller must not be able to mutate the code default for
+      # every other reader in the process.
+      @default = Freeze.deep(default)
       freeze
     end
 
@@ -68,12 +77,30 @@ module Dials
       when Array
         variants.map { |name| Dimension.new(name) }.freeze
       when Hash
-        variants.map do |name, spec|
-          spec = { options: spec } if spec.is_a?(Array) || spec.respond_to?(:call)
-          Dimension.new(name, options: spec.is_a?(Hash) ? spec[:options] : nil)
-        end.freeze
+        variants.map { |name, spec| Dimension.new(name, options: dimension_options(name, spec)) }.freeze
       else
         raise InvalidDefinition, "#{key}: variants must be a Hash or Array, got #{variants.class}"
+      end
+    end
+
+    # Strict on shape: a typo like `{ "options" => [...] }` (string key) or
+    # `{ market: "KE" }` must raise, not silently become an OPEN dimension
+    # that accepts any value.
+    def dimension_options(name, spec)
+      case spec
+      when nil then nil
+      when Hash
+        unknown = spec.keys - [:options]
+        unless unknown.empty?
+          raise InvalidDefinition,
+                "#{key}: dimension #{name} has unknown keys #{unknown.inspect} (use options: with a symbol key)"
+        end
+        spec[:options]
+      when Array then spec
+      else
+        return spec if spec.respond_to?(:call)
+
+        raise InvalidDefinition, "#{key}: dimension #{name} spec must be an Array, a callable, or { options: ... }"
       end
     end
 
@@ -102,7 +129,14 @@ module Dials
       when :integer
         "must be an integer" unless value.is_a?(Integer)
       when :float
-        "must be a number" unless value.is_a?(Numeric) && !value.is_a?(Complex)
+        # Only Integer and Float survive a JSON round-trip as numbers —
+        # BigDecimal and Rational would come back from the store as strings.
+        # Non-finite floats (NaN, Infinity) are not representable in JSON.
+        if !(value.is_a?(Integer) || value.is_a?(Float))
+          "must be an Integer or Float"
+        elsif value.is_a?(Float) && !value.finite?
+          "must be finite"
+        end
       when :string
         "must be a string" unless value.is_a?(String)
       when :json
@@ -110,9 +144,16 @@ module Dials
       end
     end
 
+    # A :json value must survive the JSON round-trip UNCHANGED. Ruby's JSON
+    # generator happily stringifies symbols, Times, and arbitrary objects —
+    # which means a write would succeed and the very next read would return
+    # a different value. Requiring round-trip equality rejects those at
+    # write time (use string keys and JSON-native types).
     def json_problem(value)
-      JSON.generate(value)
-      nil
+      decoded = JSON.parse(JSON.generate(value))
+      return nil if decoded == value
+
+      "must round-trip through JSON unchanged (use string keys and JSON-native types)"
     rescue StandardError
       "must be JSON-serializable"
     end

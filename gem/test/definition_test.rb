@@ -53,6 +53,56 @@ class DefinitionTest < Minitest::Test
     assert_equal 3, build(:c, 1.5, type: :float).validate_value!(3)
   end
 
+  def test_float_rejects_types_that_do_not_survive_json
+    require "bigdecimal"
+    definition = build(:c, 1.5, type: :float)
+    assert_raises(Dials::InvalidValue) { definition.validate_value!(BigDecimal("1.25")) }
+    assert_raises(Dials::InvalidValue) { definition.validate_value!(Rational(1, 2)) }
+    assert_raises(Dials::InvalidValue) { definition.validate_value!(Float::NAN) }
+    assert_raises(Dials::InvalidValue) { definition.validate_value!(Float::INFINITY) }
+  end
+
+  def test_json_requires_round_trip_fidelity
+    definition = build(:e, { "a" => 1 }, type: :json)
+    assert_equal({ "a" => 1, "b" => [1, 2] }, definition.validate_value!({ "a" => 1, "b" => [1, 2] }))
+    assert_equal false, definition.validate_value!(false)
+    # Symbols and Times stringify through JSON.generate — the read would
+    # return a different value than the write accepted, so they're rejected.
+    assert_raises(Dials::InvalidValue) { definition.validate_value!({ a: 1 }) }
+    assert_raises(Dials::InvalidValue) { definition.validate_value!(Time.now) }
+    assert_raises(Dials::InvalidValue) { definition.validate_value!([:sym]) }
+  end
+
+  def test_cyclic_default_raises_invalid_definition_not_stack_error
+    cycle = []
+    cycle << cycle
+    error = assert_raises(Dials::InvalidDefinition) { build(:j, cycle, type: :json) }
+    assert_match(/JSON/, error.message)
+    refute cycle.frozen?, "a failing declaration must not have frozen the caller's object"
+  end
+
+  def test_defaults_are_deep_frozen
+    string_default = build(:s, +"mutable", type: :string).default
+    assert string_default.frozen?
+
+    json_default = build(:j, { "a" => [1, 2] }, type: :json).default
+    assert json_default.frozen?
+    assert json_default["a"].frozen?
+    assert_raises(FrozenError) { json_default["a"] << 3 }
+  end
+
+  def test_malformed_dimension_specs_raise_instead_of_becoming_open
+    # String key: a typo must not silently mean "accepts anything".
+    assert_raises(Dials::InvalidDefinition) { build(variants: { market: { "options" => %w[KE NG] } }) }
+    # Scalar spec: not a valid options shape.
+    assert_raises(Dials::InvalidDefinition) { build(variants: { market: "KE" }) }
+    # Unknown option keys.
+    assert_raises(Dials::InvalidDefinition) { build(variants: { market: { choices: %w[KE] } }) }
+    # Deliberately open stays expressible.
+    assert_nil build(variants: { market: {} }).dimensions.first.options
+    assert_nil build(variants: { market: nil }).dimensions.first.options
+  end
+
   def test_range_bounds
     definition = build(bounds: 1..100)
     assert_equal 100, definition.validate_value!(100)

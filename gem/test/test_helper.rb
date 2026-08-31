@@ -10,8 +10,9 @@ module DialsTestSupport
   # store, no cache.
   def setup
     Dials.registry.reset!
-    Dials.instance_variable_set(:@config, nil)
+    Dials.instance_variable_set(:@config, Dials::Config.new)
     Dials.reset_cache!
+    Thread.current[Dials::TXN_WRITE_KEY] = nil
     super
   end
 

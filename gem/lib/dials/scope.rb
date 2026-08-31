@@ -19,19 +19,43 @@ module Dials
   module Scope
     module_function
 
-    # Normalize a caller-supplied scope hash into {symbol => string}.
+    # Normalize a caller-supplied scope hash into {symbol => string}. A hash
+    # naming the same dimension twice under different spellings
+    # ({"market" => "KE", market: "NG"}) is a caller bug — one value would
+    # silently win by insertion order — so it raises instead.
     def normalize(scope)
-      (scope || {}).to_h { |k, v| [k.to_sym, v.to_s] }
+      scope ||= {}
+      normalized = scope.to_h { |k, v| [k.to_sym, v.to_s] }
+      if normalized.size != scope.size
+        raise InvalidScope, "scope names the same dimension more than once: #{scope.keys.inspect}"
+      end
+
+      normalized
     end
+
+    # Stored canonical scopes land in an indexed VARCHAR(255); a longer
+    # string would fail (or truncate and collide) at the database on some
+    # adapters, so it fails validation here instead.
+    MAX_CANONICAL_BYTES = 255
 
     # Canonical storage/lookup string for a normalized scope.
     def canonical(scope)
-      JSON.generate(normalize(scope).sort.to_h { |k, v| [k.to_s, v] })
+      result = JSON.generate(normalize(scope).sort.to_h { |k, v| [k.to_s, v] })
+      if result.bytesize > MAX_CANONICAL_BYTES
+        raise InvalidScope, "canonical scope exceeds #{MAX_CANONICAL_BYTES} bytes: #{result[0, 80]}…"
+      end
+
+      result
     end
 
-    # Inverse of .canonical — used when loading stored rows.
+    # Inverse of .canonical — used when loading stored rows. A stored scope
+    # that is valid JSON but not an object ("42", "[]") is corrupt data, not
+    # a scope; raising InvalidScope lets loaders quarantine the row.
     def parse(canonical_string)
-      JSON.parse(canonical_string).to_h { |k, v| [k.to_sym, v] }
+      parsed = JSON.parse(canonical_string)
+      raise InvalidScope, "stored scope is not a JSON object: #{canonical_string.inspect}" unless parsed.is_a?(Hash)
+
+      parsed.to_h { |k, v| [k.to_sym, v] }
     end
 
     # Validate a scope against a definition. `exact:` requires every declared

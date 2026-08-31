@@ -35,11 +35,14 @@ Dials.configure do |config|
 end
 ```
 
-The version is the change log's max id — a single indexed query, roughly
-`SELECT MAX(id) FROM dial_changes`. Every write appends a change row in the
-same transaction as the data it describes, so the counter moves on every set
-**and every clear** (a `MAX(updated_at)` heartbeat would miss deletions; the
-change log doesn't).
+The version is the change log's **row count plus max id**. Every write
+appends a change row in the same transaction as the data it describes, so
+the version moves on every set **and every clear** (a `MAX(updated_at)`
+heartbeat would miss deletions; the change log doesn't). The count matters:
+max id alone has a gap-commit hole — transaction A claims id 10, B claims
+and commits id 11, then A commits; a process that already probed 11 would
+never see A's write. The table is append-only, so the count is
+commit-monotonic and closes the gap.
 
 The worst case after a write: every other process serves the old value for at
 most `cache_ttl` seconds, then converges. The cost of the mechanism: one
@@ -49,10 +52,27 @@ believe you need it, what you actually need is to pass the value explicitly.
 
 ## Failure behavior
 
-If the store is unreachable during a rebuild, the read raises — dials do not
-silently serve guesses. The subsequent read retries the rebuild. The probe
-itself only runs against the store when the ttl has elapsed, so a database
-blip does not multiply.
+Once a process holds a snapshot, a probe or rebuild failure serves
+**last-known-good** with a warning — a database blip must not take down
+every dial read (the values it's serving were true moments ago, and the
+next healthy probe converges). Only a cold start with no snapshot at all
+raises: there, nothing honest exists to serve.
+
+Two other concurrency properties the cache guarantees: the store is never
+queried while a lock is held (a mutex held across a connection checkout can
+deadlock a multi-threaded server's pool), and a stale refresh is
+single-flight — threads that lose the rebuild race serve the current
+snapshot instead of stampeding the database.
+
+## Writes inside application transactions
+
+If `Dials.set` runs inside one of your own database transactions, the
+uncommitted value must not leak into the shared cache (other threads would
+read it; a rollback would leave it behind). The gem handles this: the
+writing thread reads its own uncommitted state through fresh, unpublished
+snapshots until the transaction closes, and then rejoins the shared cache —
+which never held the uncommitted value at any point. Other threads see the
+write only after commit, via the normal probe.
 
 ## The escape hatches
 
