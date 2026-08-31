@@ -7,6 +7,8 @@ export default defineConfig({
   lang: 'en-US',
   cleanUrls: true,
   lastUpdated: true,
+  // README.md documents this directory for GitHub browsing; it is not a page.
+  srcExclude: ['README.md'],
   appearance: false,
   vite: {
     server: {
