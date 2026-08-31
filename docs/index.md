@@ -25,9 +25,12 @@ SIGNUPS_ENABLED = true
 
 Then the arc begins. Someone needs to change a fee **today**, so the constant
 becomes a database row with an admin form. Then a second market launches and
-needs a *different* fee, so the row grows a country column, a sentinel value
-for "global", and a pile of special-case reads. Six months later nobody is
-sure which values are real, who changed them, or what the safe range is.
+needs a *different* fee, so the row grows a country column and a sentinel
+value for "global". Six months later the app has some values in specialized
+domain tables, others in an app-wide settings table, and a home-brewed
+resolver next to each one — every developer solving fallback, validation,
+and caching again, slightly differently, with no shared answer to "who
+changed this and what values are safe?"
 
 Dials is that whole arc, designed once:
 
