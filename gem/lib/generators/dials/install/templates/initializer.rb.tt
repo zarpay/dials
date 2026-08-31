@@ -1,0 +1,32 @@
+# frozen_string_literal: true
+
+require "dials/active_record"
+
+Dials.configure do |config|
+  # Where values live. :active_record uses the tables created by
+  # `rails g dials:install`; :memory keeps everything in-process (handy in
+  # test environments that never exercise persistence).
+  config.store = :active_record
+
+  # Seconds between cache staleness probes (one cheap query per process per
+  # interval). 0 probes on every read; nil never probes.
+  # config.cache_ttl = 5.0
+
+  # How an actor is rendered in the change log.
+  # config.actor_label = ->(actor) { actor.email }
+end
+
+# Declare your dials. A dial with no `variants:` is global-only by
+# construction. Declaring `variants:` is the arming gate — add it in the same
+# change as the code that reads the varied value.
+Dials.define do
+  # dial :merchant_fee_bps, 100,
+  #      type: :integer,
+  #      bounds: 1..10_000,
+  #      unit: "bps",
+  #      description: "Fee charged to merchants, in basis points.",
+  #      variants: { market: { options: %w[KE NG BD] } }
+
+  # dial :signups_enabled, true, type: :boolean,
+  #      description: "Global kill switch for new signups."
+end

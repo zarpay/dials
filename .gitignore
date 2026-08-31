@@ -1,0 +1,16 @@
+*.gem
+.DS_Store
+.gstack/
+docs/node_modules/
+docs/.vitepress/dist/
+docs/.vitepress/cache/
+demo/log/*
+demo/tmp/*
+demo/storage/*
+demo/db/*.sqlite3
+demo/db/*.sqlite3-*
+!demo/log/.keep
+!demo/tmp/.keep
+!demo/storage/.keep
+tmp/
+demo/config/master.key

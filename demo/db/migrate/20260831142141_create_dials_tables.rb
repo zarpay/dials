@@ -1,0 +1,43 @@
+# frozen_string_literal: true
+
+class CreateDialsTables < ActiveRecord::Migration[8.1]
+  def change
+    # A dial's stored global override. A row exists only once something about
+    # the dial has been overridden; `value` is JSON-encoded text, and NULL
+    # means "no global override" (the row is then only a parent for
+    # variations). Values are never queried in SQL — reads go through the
+    # in-process cache — so portable text beats jsonb here.
+    create_table :dials do |t|
+      t.string :key, null: false
+      t.text :value
+      t.timestamps
+    end
+    add_index :dials, :key, unique: true
+
+    # Per-scope overrides. scope is the canonical JSON string of the
+    # variation's dimensions ({"market":"KE"}), unique per dial. The NOT NULL
+    # foreign key is the invariant: no variation without a parent row.
+    create_table :dial_variations do |t|
+      t.references :dial, null: false, foreign_key: true
+      t.string :scope, null: false
+      t.text :value, null: false
+      t.timestamps
+    end
+    add_index :dial_variations, [:dial_id, :scope], unique: true
+
+    # Append-only attribution log. Doubles as the cache's version counter
+    # (max id moves on every write). No updated_at: rows are facts.
+    create_table :dial_changes do |t|
+      t.string :key, null: false
+      t.string :scope
+      t.string :action, null: false
+      t.text :old_value
+      t.text :new_value
+      t.string :actor_type
+      t.string :actor_id
+      t.string :actor_label
+      t.datetime :created_at, null: false
+    end
+    add_index :dial_changes, :key
+  end
+end

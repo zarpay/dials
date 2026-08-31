@@ -1,0 +1,133 @@
+# API Reference
+
+## Declaration
+
+### `Dials.define(&block)`
+
+Runs the block against the registry. Blocks accumulate; a duplicate key
+raises `Dials::DuplicateDial` at boot.
+
+### `dial(key, default, type:, bounds: nil, label: nil, unit: nil, description: nil, variants: nil)`
+
+Declares one dial (inside a `define` block). Raises
+`Dials::InvalidDefinition` at boot when the declaration is malformed or the
+default fails its own type/bounds.
+
+| Argument | Type | Notes |
+|---|---|---|
+| `key` | Symbol/String | unique across the app |
+| `default` | value | the code default; validated like any stored value |
+| `type:` | Symbol | `:boolean` `:integer` `:float` `:string` `:json` |
+| `bounds:` | Range, Array, or callable | optional; callable returns truthy for storable |
+| `label:` | String | defaults to the humanized key |
+| `unit:` | String | display metadata (`"bps"`, `"cents"`, `"hours"`) |
+| `description:` | String | shown on admin surfaces; write one |
+| `variants:` | Hash or Array | variant dimensions; see below |
+
+`variants:` shapes, all equivalent where applicable:
+
+```ruby
+variants: { market: { options: %w[KE NG BD] } }   # canonical
+variants: { market: %w[KE NG BD] }                # shorthand: options array
+variants: { market: -> { Market.pluck(:code) } }  # callable, resolved lazily
+variants: { locale: {} }                          # open: any non-empty string
+variants: [:market, :platform]                    # names only, all open
+```
+
+## Reading
+
+### `Dials.get(key, **scope) → value`
+
+Resolves variation → global override → code default. Scope must name every
+declared dimension exactly (values compared as strings). Raises
+`Dials::UnknownDial`, `Dials::InvalidScope`. Returned `:json` values are
+deep-frozen; hash keys are strings.
+
+### `Dials.registry`
+
+Enumerable of `Dials::Definition`. Useful members for building UIs:
+
+```ruby
+Dials.registry.keys                 # [:checkout_fee_bps, ...]
+Dials.registry.fetch(:key)          # Definition (raises UnknownDial)
+Dials.registry.defined?(:key)       # true/false
+definition.key .default .type .label .unit .description
+definition.variants?                # any dimensions?
+definition.dimension_names          # [:market, :platform]
+definition.dimensions               # [Dimension(name, options), ...]
+definition.problems_for(value)      # [] when storable, else messages
+```
+
+## Writing
+
+### `Dials.set(key, value, actor:, scope: nil) → value`
+
+Stores an override — global without `scope:`, a variation with. Validates
+type, bounds, and scope; requires `actor:`. Appends to the change log and
+busts the local cache. Raises `Dials::InvalidValue`, `Dials::InvalidScope`,
+`Dials::MissingActor`, `Dials::UnknownDial`.
+
+### `Dials.clear(key, actor:, scope: nil) → true/false`
+
+Removes an override; resolution falls to the next layer down. Returns
+whether an override existed; clearing nothing is a silent no-op (no log
+entry).
+
+### `Dials.changes(key: nil, limit: 50) → [ChangeRecord]`
+
+Newest-first history. `ChangeRecord` is a Data class:
+`key, scope, action ("set"/"clear"), old_value, new_value, actor_type,
+actor_id, actor_label, created_at`, plus `#global?`.
+
+## Configuration
+
+```ruby
+Dials.configure do |config|
+  config.store = :active_record        # or :memory, or any store instance
+  config.cache_ttl = 5.0               # seconds; 0 = probe every read; nil = never
+  config.actor_label = ->(actor) { }   # change-log label builder
+end
+```
+
+### `Dials.reload!`
+
+Discard this process's snapshot; the next read rebuilds from the store.
+Needed after writes that bypass the gem, and in test suites (see
+[Testing](/guides/testing)).
+
+## Testing
+
+### `Dials::Testing.with_overrides(hash, &block)`
+
+Thread-local, validated, nestable value pinning for the block's duration.
+Applies to every scope of each pinned dial; never touches store, cache, or
+log.
+
+## Stores
+
+A store is any object implementing the interface documented in
+[`Dials::Stores::Memory`](https://github.com/zarpay/dials/blob/main/gem/lib/dials/stores/memory.rb)
+(`state`, `version`, `set_global`, `clear_global`, `set_variation`,
+`clear_variation`, `changes`). Shipped: `Stores::Memory` (default) and
+`Stores::ActiveRecordStore` (via `require "dials/active_record"`).
+
+## Generator
+
+```bash
+bin/rails generate dials:install
+```
+
+Creates the three-table migration and `config/initializers/dials.rb`.
+
+## Errors
+
+All inherit `Dials::Error`:
+
+| Error | Raised when |
+|---|---|
+| `UnknownDial` | read/write of an undeclared key |
+| `DuplicateDial` | a key declared twice |
+| `InvalidDefinition` | malformed declaration (boot-time) |
+| `InvalidValue` | wrong type, out of bounds, or nil on write/pin |
+| `InvalidScope` | wrong/missing/unknown dimensions or values |
+| `MissingActor` | write without `actor:` |
