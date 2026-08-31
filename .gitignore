@@ -14,3 +14,4 @@ demo/db/*.sqlite3-*
 !demo/storage/.keep
 tmp/
 demo/config/master.key
+gem/Gemfile.lock
