@@ -61,6 +61,7 @@ export default defineConfig({
         items: [
           { text: 'Design Decisions', link: '/design/decisions' },
           { text: 'Compared to Alternatives', link: '/design/comparisons' },
+          { text: 'Possible Enhancements', link: '/design/possible-enhancements' },
         ],
       },
       {

@@ -70,7 +70,7 @@ Stored scopes are canonicalized — keys sorted, values stringified — so
 are one scope, enforced by a unique index on `(dial_id, scope)`. A scope
 written once can never be re-stored under a cosmetically different spelling.
 
-## The planned path to partial scopes
+## The path to partial scopes (if ever needed)
 
 Sometimes you will want `{ market: "KE" }` to cover every platform without
 writing three rows. That is a **partial scope**, and the gem is built so
@@ -89,4 +89,5 @@ adding it later is a write-side relaxation, not a redesign:
 
 v1 ships exact-only because partial precedence is a concept operators must
 hold in their heads, and the right time to charge that cost is when a real
-need arrives — not before.
+need arrives — not before. Whether it ever ships is tracked in
+[Possible Enhancements](/design/possible-enhancements).
