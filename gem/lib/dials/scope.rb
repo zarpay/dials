@@ -14,11 +14,23 @@ module Dials
     # (and then collide) on some adapters, so it fails here instead.
     MAX_BYTES = 255
 
+    # One dimension's value. Well under MAX_BYTES so a scope naming several
+    # dimensions still fits.
+    MAX_VALUE_BYTES = 128
+
     module_function
 
     def normalize(scope)
       normalized = scope.to_h { |name, value| [name.to_sym, value.to_s] }
       raise InvalidScope, "scope names a dimension twice: #{scope.keys.inspect}" if normalized.size != scope.size
+
+      normalized.each do |name, value|
+        # An empty value is almost always a missing one — `market: params[:market]`
+        # with no param gives "". Reading the global instead of saying so would
+        # be a wrong answer delivered quietly.
+        raise InvalidScope, "#{name} is empty (a missing value must not read as the global)" if value.empty?
+        raise InvalidScope, "#{name} is longer than #{MAX_VALUE_BYTES} bytes" if value.bytesize > MAX_VALUE_BYTES
+      end
 
       normalized
     end

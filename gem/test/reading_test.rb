@@ -95,6 +95,24 @@ class ReadingTest < DialsTest
     assert_match(/"ZA" is not a valid market/, error.message)
   end
 
+  def test_an_empty_dimension_value_raises_rather_than_reading_the_global
+    declare_fee_and_switch
+    Dials.adjust(:checkout_fee_bps, 300, actor: OPS)
+
+    # `market: params[:market]` with a missing param arrives as "". Answering
+    # with the global would be a wrong answer delivered quietly.
+    error = assert_raises(Dials::InvalidScope) { Dials.checkout_fee_bps(market: nil) }
+    assert_match(/market is empty/, error.message)
+    assert_raises(Dials::InvalidScope) { Dials.checkout_fee_bps(market: "") }
+  end
+
+  def test_an_overlong_dimension_value_raises
+    Dials.define { dial :fee, default: 1, type: Integer, variants: { market: String } }
+
+    assert_raises(Dials::InvalidScope) { Dials.fee(market: "x" * 129) }
+    assert_equal 1, Dials.fee(market: "x" * 128)
+  end
+
   def test_a_dial_without_variants_takes_no_scope
     declare_fee_and_switch
 

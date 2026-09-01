@@ -65,12 +65,16 @@ Everything below is breaking.
   `Dials` itself. The `Config` class, the `Railtie`, `Snapshot`, `Resolver`,
   `Registry`, `Actor`, `Freeze`, and `ChangeRecord` are all gone.
 
-**Deliberately not carried over:** last-known-good serving when the database is
-unreachable (a failed read now raises), the single-flight/generation-counter
-guarding around cache rebuilds (a concurrent rebuild may republish a snapshot up
-to `cache_ttl` stale), corrupt-row quarantining, and the thread-local
-in-transaction read isolation (a rolled-back write can outlive its example in
-the cache unless the suite calls `Dials.reload!`).
+**Deliberately not carried over:** the single-flight/generation-counter guarding
+around cache rebuilds (a concurrent rebuild may republish a snapshot up to
+`cache_ttl` stale), corrupt-row quarantining (one row written around the gem now
+raises on every read), and the thread-local in-transaction read isolation (a
+rolled-back write can outlive its example in the cache unless the suite calls
+`Dials.reload!`).
+
+**Kept:** last-known-good serving. A read that cannot reach the database serves
+the cached overrides with a warning rather than raising, and only raises when
+there is no cache yet and so nothing honest to serve.
 
 ## Previous design
 

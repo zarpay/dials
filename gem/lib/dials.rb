@@ -138,9 +138,22 @@ module Dials
 
       # Version read before the data: if a write lands between the two, the
       # cache carries a version older than what it holds and the next probe
-      # rebuilds. Stale only ever in the safe direction.
+      # rebuilds. Stale only ever in the safe direction. Both fields are
+      # assigned only once the load has succeeded, so a failed rebuild cannot
+      # leave the version claiming to be current.
+      loaded = Record.overrides
       @version = version
-      @overrides = Record.overrides
+      @overrides = loaded
+    rescue ::ActiveRecord::ActiveRecordError => e
+      # A database blip must not take down every dial read in the process —
+      # including on paths that would not otherwise touch the database. With a
+      # snapshot in hand, serve it and say so; with none there is nothing
+      # honest to serve. The probe timestamp was claimed above, so a downed
+      # database is retried once per cache_ttl rather than on every read.
+      raise unless cached
+
+      warn "[dials] serving the last known overrides (#{e.class}: #{e.message})"
+      cached
     end
 
     # Force the next read to rebuild from the database. Test suites that roll

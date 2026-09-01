@@ -184,6 +184,11 @@ end
 Dials.reload!                   # give up the cache now
 ```
 
+A read that cannot reach the database serves the cached overrides and warns,
+rather than raising — a blip must not take down every dial read in the process,
+including on paths that would not otherwise touch the database. It raises only
+when there is no cache yet, because then there is nothing honest to serve.
+
 ## Testing
 
 ```ruby

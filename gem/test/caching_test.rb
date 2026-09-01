@@ -79,7 +79,63 @@ class CachingTest < DialsTest
     assert_equal 120, Dials.checkout_fee_bps(market: "BD")
   end
 
+  def test_a_database_blip_serves_the_last_known_overrides
+    Dials.cache_ttl = 0
+    declare_fee_and_switch
+    Dials.adjust(:checkout_fee_bps, 120, market: "BD", actor: OPS)
+    assert_equal 120, Dials.checkout_fee_bps(market: "BD") # warm
+
+    _out, err = capture_io do
+      with_the_database_down do
+        assert_equal 120, Dials.checkout_fee_bps(market: "BD")
+        assert_equal 250, Dials.checkout_fee_bps(market: "KE")
+      end
+    end
+
+    assert_match(/\[dials\] serving the last known overrides/, err)
+  end
+
+  def test_a_blip_with_no_cache_yet_raises_because_there_is_nothing_honest_to_serve
+    declare_fee_and_switch
+    Dials.reload!
+
+    with_the_database_down do
+      assert_raises(ActiveRecord::StatementInvalid) { Dials.checkout_fee_bps(market: "BD") }
+    end
+  end
+
+  def test_a_failed_rebuild_does_not_leave_the_version_claiming_to_be_current
+    Dials.cache_ttl = 0
+    declare_fee_and_switch
+    assert_equal 250, Dials.checkout_fee_bps(market: "BD") # warm
+
+    write_from_another_process(120)
+
+    # The version check sees the write, then the load fails. If the version had
+    # been advanced anyway, that write would stay invisible forever.
+    capture_io { with_the_database_down(fail_on: :overrides) { Dials.checkout_fee_bps(market: "BD") } }
+
+    assert_equal 120, Dials.checkout_fee_bps(market: "BD")
+  end
+
   private
+
+  # Replaces one of Record's two read queries with a connection failure.
+  def with_the_database_down(fail_on: :version)
+    original = Dials::Record.method(fail_on)
+    redefine(fail_on) { |*| raise ActiveRecord::StatementInvalid, "connection to the server was lost" }
+    yield
+  ensure
+    redefine(fail_on, original)
+  end
+
+  def redefine(name, body = nil, &block)
+    was = $VERBOSE
+    $VERBOSE = nil # replacing a method is the point here, not an accident
+    Dials::Record.define_singleton_method(name, body || block)
+  ensure
+    $VERBOSE = was
+  end
 
   # Writes the row without going through Dials, which is what a write from a
   # second web process looks like from in here: the row lands, and nothing
