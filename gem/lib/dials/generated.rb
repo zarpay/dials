@@ -35,11 +35,14 @@ module Dials
           raise InvalidDefinition, "dial #{key} would define Dials.#{name}, which already exists"
         end
 
+        # actor: defaults to nil rather than being a required keyword so that
+        # apps declaring config.default_actor can write without one; with no
+        # default configured, Actor.normalize still raises MissingActor.
         define_method(names[0]) { |**scope| get(key, **scope) }
-        define_method(names[1]) do |value, actor:, expected_version: nil, **scope|
+        define_method(names[1]) do |value, actor: nil, expected_version: nil, **scope|
           set(key, value, actor: actor, scope: scope, expected_version: expected_version)
         end
-        define_method(names[2]) do |actor:, expected_version: nil, **scope|
+        define_method(names[2]) do |actor: nil, expected_version: nil, **scope|
           clear(key, actor: actor, scope: scope, expected_version: expected_version)
         end
       end

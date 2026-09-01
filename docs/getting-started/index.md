@@ -90,9 +90,13 @@ Dials.clear_checkout_fee_bps(actor: current_admin, market: "BD")
 Dials.clear_checkout_fee_bps(actor: current_admin)
 ```
 
-`actor:` is required on every write — there is no anonymous mutation path.
-(That is also why `actor` is a reserved dimension name.) Values are validated
-against the declared type and schema before anything is stored.
+Every write is attributed — there is no anonymous mutation path the app
+didn't declare. `actor:` takes any object; strings are first-class
+(`actor: "console"`, no User model needed), and apps without user identity
+can declare a fallback once (`config.default_actor`) instead of passing it
+per write. (Attribution is also why `actor` is a reserved dimension name.)
+Values are validated against the declared type and schema before anything
+is stored.
 
 ## Dynamic access
 

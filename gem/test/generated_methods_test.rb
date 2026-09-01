@@ -36,9 +36,9 @@ class GeneratedMethodsTest < Minitest::Test
     assert_raises(Dials::InvalidScope) { Dials.adjust_support_email("x@example.com", actor: ACTOR, market: "KE") }
   end
 
-  def test_adjust_requires_actor_as_a_keyword
+  def test_adjust_without_actor_raises_unless_a_default_actor_is_configured
     define_standard_dials
-    assert_raises(ArgumentError) { Dials.adjust_signups_enabled(false) }
+    assert_raises(Dials::MissingActor) { Dials.adjust_signups_enabled(false) }
   end
 
   def test_false_is_storable_through_adjust

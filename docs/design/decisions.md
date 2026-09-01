@@ -152,10 +152,21 @@ separate opt-in engine later; it will not grow inside the core.
 
 ## `actor:` is explicit, required, and unguessed
 
-No `Current.user` discovery, no default. The write surface knows who is
-acting; the gem should not guess and must not allow anonymous writes. A
-console write is `actor: "keith — BD launch"` — string actors are
-first-class because attributed console operations beat unattributed ones.
+No `Current.user` discovery. The write surface knows who is acting; the gem
+should not guess. A console write is `actor: "keith — BD launch"` — string
+actors are first-class because attributed console operations beat
+unattributed ones.
+
+One relaxation, for apps with no user identity at all: an app may *declare*
+a fallback (`config.default_actor`, a value or per-write callable) in its
+initializer, making `actor:` optional. That preserves the decision's core —
+the gem never discovers an actor on its own; the fallback is a reviewed,
+deliberate line of configuration, an explicit `actor:` always wins, and
+with no fallback declared the requirement stands unchanged. What was NOT
+built: a no-logging mode — the change log is also the cache's version
+counter and the CAS comparison target, so silencing it would break
+convergence and stale-write protection (see
+[Possible Enhancements](/design/possible-enhancements)).
 
 ## The arming gate is the declaration itself
 

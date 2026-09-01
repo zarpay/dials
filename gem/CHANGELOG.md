@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+- **`config.default_actor` — attribution without a User model.** Apps with
+  no user identity can declare a fallback actor once (a string/object, or a
+  callable evaluated per write, e.g. `-> { ENV.fetch("USER", "console") }`)
+  and `actor:` becomes optional on every write path, including the generated
+  writers. An explicit `actor:` always wins; with no fallback declared,
+  writes without `actor:` raise `MissingActor` exactly as before. (String
+  actors were always first-class — this only removes the per-write
+  requirement for apps that declare their fallback.)
 - **Enumeration API.** `Dials.variations(key)` returns one dial's stored
   variations keyed by parsed scope hashes ("which markets override this
   dial?"), and `Dials.overview` returns every registered dial's full state —

@@ -71,6 +71,24 @@ from `Dials.overview`, with a mismatch raising `Dials::StaleWrite`. See the
 [API Reference](/reference/api#writing) and the design notes in
 [Design Decisions](/design/decisions).
 
+## Disabling the change log
+
+**The idea.** A mode (config flag plus a generator option to skip the
+`dial_changes` table) for apps that want dials without history.
+
+**Why it waits — and probably always will.** The change log is not just
+history: it is the store's **version counter** — the thing the cache
+staleness probe watches and the value `expected_version:` compares. Turning
+it off would leave other processes never converging after a write and
+stale-write protection with nothing to compare, so a no-log mode needs a
+second versioning mechanism (a counter on the `dial_locks` anchor row is
+the obvious sketch) plus a silently-empty `Dials.changes`. Meanwhile the
+motivations dissolve on inspection: attribution never needed a User model
+(string actors; `config.default_actor` makes `actor:` optional), a
+PII concern is answered by `config.default_actor = "anonymous"`, and at
+operator write-rates the log stays small forever. An app that truly wants
+no record of operator changes is asking this gem to stop being itself.
+
 ## Non-ActiveRecord stores
 
 **The idea.** The store interface is small and documented

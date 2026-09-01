@@ -30,6 +30,27 @@ The gem deliberately does **not** discover the actor itself (no
 lives, so the actor is explicit at the call site. See
 [Build a Write Surface](/guides/build-a-write-surface).
 
+## Apps without user identity
+
+Attribution never required a User model: `actor:` takes any object, and
+strings are first-class — `actor: "keith — BD launch"` from a console is a
+fully attributed write. For apps with no identity to pass at all
+(single-operator tools, scripts), declare a fallback once and `actor:`
+becomes optional:
+
+```ruby
+Dials.configure do |config|
+  config.default_actor = "anonymous"                         # log, anonymously
+  # config.default_actor = -> { ENV.fetch("USER", "console") } # or per write
+end
+```
+
+The log keeps everything else (what changed, when, old → new); only the
+"who" degrades to the declared fallback. An explicit `actor:` always wins,
+and with no `default_actor` configured, writes without `actor:` raise
+`MissingActor` exactly as before — the fallback is something an app
+declares in a reviewed initializer, never something the gem assumes.
+
 ## The log is append-only
 
 Every write lands one row in `dial_changes`:

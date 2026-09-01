@@ -10,10 +10,20 @@ module Dials
     # Builds the human label stored on every change-log entry.
     attr_accessor :actor_label
 
+    # Fallback attribution for writes that pass no actor: — for apps without
+    # user identity (no User model, single-operator tools, scripts). A
+    # string/object, or a callable evaluated per write
+    # (`-> { ENV.fetch("USER", "console") }`). nil (the default) keeps
+    # actor: required on every write. This is a declared app-level fallback,
+    # not discovery — the gem still never guesses (no Current.user magic),
+    # and an explicit actor: always wins.
+    attr_accessor :default_actor
+
     def initialize
       @store = nil
       @cache_ttl = 5.0
       @actor_label = Actor::DEFAULT_LABEL
+      @default_actor = nil
     end
 
     def cache_ttl=(seconds)

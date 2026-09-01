@@ -14,6 +14,12 @@ Dials.configure do |config|
 
   # How an actor is rendered in the change log.
   # config.actor_label = ->(actor) { actor.email }
+
+  # No User model? Attribution does not need one — actor: takes any object,
+  # and strings are first-class (actor: "console"). To make actor: optional,
+  # declare an app-level fallback (a value, or a callable evaluated per
+  # write). Leave unset to require actor: on every write.
+  # config.default_actor = -> { ENV.fetch("USER", "console") }
 end
 
 # Declare your dials. A dial with no `variants:` is global-only by

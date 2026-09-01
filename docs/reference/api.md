@@ -241,8 +241,25 @@ Dials.configure do |config|
   config.store = :active_record        # or :memory, or any store instance
   config.cache_ttl = 5.0               # seconds; 0 = probe every read; nil = never
   config.actor_label = ->(actor) { }   # change-log label builder
+  config.default_actor = nil           # fallback attribution; see below
 end
 ```
+
+### `config.default_actor`
+
+Fallback attribution for writes that pass no `actor:` — for apps without
+user identity (no User model, single-operator tools, scripts). A
+string/object, or a callable evaluated per write:
+
+```ruby
+config.default_actor = "anonymous"                        # log, anonymously
+config.default_actor = -> { ENV.fetch("USER", "console") } # log the OS user
+```
+
+`nil` (the default) keeps `actor:` required on every write. An explicit
+`actor:` always wins over the default. This is a declared app-level
+fallback, not discovery — the gem still never guesses (no `Current.user`
+magic).
 
 ### `Dials.reload!`
 
@@ -285,5 +302,5 @@ All inherit `Dials::Error`:
 | `InvalidDefinition` | malformed declaration (boot-time) |
 | `InvalidValue` | wrong type, schema violation, or nil on write/pin |
 | `InvalidScope` | wrong/missing/unknown dimensions or values |
-| `MissingActor` | write without `actor:` |
+| `MissingActor` | write without `actor:` and no `config.default_actor` declared |
 | `StaleWrite` | `expected_version:` no longer matches the store — unapplied, unlogged |
