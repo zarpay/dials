@@ -1,31 +1,58 @@
 # frozen_string_literal: true
 
-$LOAD_PATH.unshift File.expand_path("../lib", __dir__)
-
-require "dials"
 require "minitest/autorun"
+require "active_record"
+require "dials"
 
-module DialsTestSupport
-  # Every test starts from a blank slate: empty registry, fresh in-memory
-  # store, no cache.
+# The gem tests run against a real database, because a fake one would not
+# exercise the thing most worth exercising: the single append-only table.
+ActiveRecord::Base.establish_connection(adapter: "sqlite3", database: ":memory:")
+ActiveRecord::Schema.verbose = false
+ActiveRecord::Schema.define do
+  create_table :dials, force: true do |t|
+    t.string   :key,   null: false
+    t.string   :scope, null: false, default: "{}"
+    t.text     :value
+    t.string   :actor_type
+    t.string   :actor_id
+    t.string   :actor_label
+    t.datetime :created_at, null: false
+  end
+  add_index :dials, %i[key scope id]
+end
+
+Operator = Struct.new(:id, :email)
+
+class DialsTest < Minitest::Test
+  OPS = Operator.new(7, "ops@example.com")
+
   def setup
-    Dials.registry.reset!
-    Dials.instance_variable_set(:@config, Dials::Config.new)
-    Dials.reset_cache!
-    Thread.current[Dials::TXN_WRITE_KEY] = nil
-    super
+    Dials.reset!
+    Dials::Record.delete_all
+    Dials.actor_label = nil
+    # Tests want every write visible at once, with no waiting on a probe.
+    Dials.cache_ttl = 0
   end
 
-  ACTOR = "test-operator"
-
-  def define_standard_dials
+  # The two dials most tests need: one plain, one varied.
+  def declare_fee_and_switch
     Dials.define do
-      dial :merchant_fee_bps, default: 100, type: :integer, minimum: 1, maximum: 10_000, unit: "bps",
-           variants: { market: { enum: %w[KE NG BD] } }
-      dial :signups_enabled, default: true, type: :boolean
-      dial :free_delivery_threshold, default: 50, type: :integer, minimum: 0, maximum: 1_000_000,
-           variants: { market: { enum: %w[KE NG BD] }, platform: { enum: %w[ios android web] } }
-      dial :support_email, default: "support@example.com", type: :string
+      dial :checkout_fee_bps, default: 250, type: _Integer(1..10_000),
+           unit: "bps", description: "Fee charged at checkout.",
+           variants: { market: %w[KE NG BD] }
+
+      dial :signups_enabled, default: true, type: _Boolean
     end
+  end
+
+  def count_queries
+    queries = []
+    subscriber = ActiveSupport::Notifications.subscribe("sql.active_record") do |_, _, _, _, payload|
+      queries << payload[:sql] unless payload[:name] == "SCHEMA"
+    end
+    yield
+    queries
+  ensure
+    ActiveSupport::Notifications.unsubscribe(subscriber)
   end
 end

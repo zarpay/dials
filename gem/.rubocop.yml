@@ -62,3 +62,17 @@ Gemspec/DevelopmentDependencies:
 
 Gemspec/RequireMFA:
   Enabled: false
+
+# A dial's type is anything that answers ===: a class, a range, a regexp, an
+# Array of allowed values, a Literal type. The operator is the abstraction.
+Style/CaseEquality:
+  Enabled: false
+
+# Dial#clear returns whether there was anything to clear. Naming it clear? would
+# read as a question about state rather than the instruction it is.
+Naming/PredicateMethod:
+  Enabled: false
+
+# dials.rb declares the error hierarchy before requiring the files that raise it.
+Style/OneClassPerFile:
+  Enabled: false

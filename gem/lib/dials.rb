@@ -1,229 +1,213 @@
 # frozen_string_literal: true
 
 require "json"
+require "literal"
 
 require_relative "dials/version"
-require_relative "dials/errors"
-require_relative "dials/generated"
-require_relative "dials/freeze"
-require_relative "dials/schema"
-require_relative "dials/dimension"
-require_relative "dials/definition"
-require_relative "dials/registry"
-require_relative "dials/scope"
-require_relative "dials/snapshot"
-require_relative "dials/resolver"
-require_relative "dials/cache"
-require_relative "dials/change_record"
-require_relative "dials/actor"
-require_relative "dials/stores/memory"
-require_relative "dials/config"
-require_relative "dials/testing"
 
-# Dials: operator-adjustable values with per-variant overrides.
+# Dials: constants you can turn without a deploy.
 #
-# A dial is a value that starts life as a code default, can be overridden
-# globally at runtime, and can be overridden again per variant scope
-# (per market, per platform, ...). Resolution is always:
+# A dial is declared in code with a default, a type, and optionally the
+# dimensions it may vary along. Operators override it at runtime; the override
+# lives in one append-only table, is served from a per-process cache, and
+# carries the actor who made it.
 #
-#   variation → global override → code default
+#   Dials.define do
+#     dial :checkout_fee_bps, default: 250, type: _Integer(1..10_000),
+#          unit: "bps", variants: { market: %w[KE NG BD] }
+#   end
 #
-# Declarations live in code (Dials.define); values live in a store; reads
-# come from a per-process cache. Every write is attributed and logged.
-#
-# Declaring a dial generates its methods (see Generated):
-#
-#   Dials.use_base_fee(market: "KE")                  # read
-#   Dials.adjust_base_fee(25, actor: ops, market: "KE") # write
-#   Dials.clear_base_fee(actor: ops, market: "KE")      # remove an override
-#
-# The key-taking primitives (get, set, clear) stay public underneath — they
-# are the dynamic-access layer for code that receives the key at runtime
-# (an admin surface iterating the registry, a console one-liner).
+#   Dials.checkout_fee_bps                        # => the Dial
+#   Dials.checkout_fee_bps.for(market: "KE")      # => 250
+#   Dials.checkout_fee_bps.set(120, market: "BD", actor: ops)
+#   Dials.checkout_fee_bps.for(market: "BD")      # => 120
 module Dials
-  # Thread-local marker: this thread performed a dial write inside a
-  # database transaction that is still open. While set, the thread's reads
-  # come from fresh, UNPUBLISHED snapshots — it sees its own uncommitted
-  # write, but the uncommitted value never lands in the shared cache (where
-  # other threads would read it, and where it would survive a rollback).
-  TXN_WRITE_KEY = :dials_wrote_in_open_transaction
+  class Error < StandardError; end
 
-  CACHE_LOCK = Mutex.new
+  # Asked for a dial that was never declared.
+  class UnknownDial < Error; end
+
+  # The declaration itself is wrong (bad type, default that fails its own type,
+  # a key that is already taken).
+  class InvalidDial < Error; end
+
+  # A value that a dial will not accept.
+  class InvalidValue < Error; end
+
+  # A scope that names a dimension the dial does not have, or a value that
+  # dimension does not allow.
+  class InvalidScope < Error; end
+end
+
+require_relative "dials/scope"
+require_relative "dials/dial"
+require_relative "dials/record"
+
+module Dials
+  # Per-dial reader methods (`Dials.checkout_fee_bps`) are defined here rather
+  # than on Dials itself, so `reset!` can strip every one of them without going
+  # anywhere near the real API.
+  module Readers; end
+  extend Readers
+
+  # The DSL `Dials.define` runs its block against. It includes Literal's type
+  # helpers, so `_Integer(1..10_000)` and friends are in scope inside the block
+  # without the app having to include anything.
+  class DSL
+    include Literal::Types
+
+    def dial(key, **) = Dials.register(Dial.new(key, **))
+  end
+
+  # Thread-local pinned values (see .stub).
+  STUBS = :dials_stubs
+
+  # How an actor is labelled in the change log, when the app has not said
+  # otherwise.
+  DEFAULT_ACTOR_LABEL = lambda do |actor|
+    if actor.is_a?(String) then actor
+    elsif actor.respond_to?(:email) && actor.email then actor.email
+    elsif actor.respond_to?(:name) && actor.name then actor.name
+    else [actor.class.name, (actor.id if actor.respond_to?(:id))].compact.join("#")
+    end
+  end
 
   class << self
-    # -- declaration ---------------------------------------------------------
+    # Seconds between checks for writes made by *other* processes. 0 checks on
+    # every read; the default trades five seconds of convergence for one query
+    # per five seconds per process.
+    attr_accessor :cache_ttl
 
-    attr_reader :registry, :config
+    # A callable turning an actor into the label stored on every change.
+    attr_accessor :actor_label
 
-    # Declare dials:
+    def configure = yield(self)
+
+    # -- declaring -----------------------------------------------------------
+
+    # Declare dials. Call it as many times as you like; declarations
+    # accumulate, so an app can split them up by domain.
+    def define(&) = DSL.new.instance_eval(&)
+
+    # Look a dial up by key — for code handed the key at runtime, like an admin
+    # screen iterating the catalog.
+    def [](key)
+      registry.fetch(key.to_sym) do
+        raise UnknownDial, "no dial named #{key.inspect} (declared: #{registry.keys.join(', ')})"
+      end
+    end
+
+    def registry = @registry ||= {}
+    def all = registry.values
+    def each(&) = all.each(&)
+
+    # Not public API; DSL#dial calls it.
+    def register(dial)
+      raise InvalidDial, "dial #{dial.key} is already declared" if registry.key?(dial.key)
+      raise InvalidDial, "dial #{dial.key} would define Dials.#{dial.key}, which already exists" if respond_to?(dial.key, true)
+
+      Readers.define_method(dial.key) { dial }
+      registry[dial.key] = dial
+    end
+
+    # -- reading -------------------------------------------------------------
+
+    # Every stored override in the system, cached per process:
     #
-    #   Dials.define do
-    #     dial :merchant_fee_bps, default: 100, type: :integer,
-    #          minimum: 1, maximum: 10_000, unit: "bps",
-    #          variants: { market: { enum: %w[KE NG BD] } }
-    #     dial :signups_enabled, default: true, type: :boolean
-    #   end
+    #   { key(Symbol) => { scope(Hash) => value } }
     #
-    # Each declaration generates the dial's methods: use_merchant_fee_bps,
-    # adjust_merchant_fee_bps, clear_merchant_fee_bps (see Generated).
-    def define(&)
-      registry.instance_eval(&)
+    # Rebuilt immediately when this process writes, and — at most once every
+    # `cache_ttl` seconds — when a cheap version check shows that another
+    # process has.
+    def overrides
+      cached = @overrides
+      return cached if cached && !probe_due?
+
+      @probed_at = monotonic
+      version = Record.version
+      return cached if cached && version == @version
+
+      # Version read before the data: if a write lands between the two, the
+      # cache carries a version older than what it holds and the next probe
+      # rebuilds. Stale only ever in the safe direction.
+      @version = version
+      @overrides = Record.overrides
     end
 
-    # -- configuration -------------------------------------------------------
-
-    def configure
-      yield config
-    end
-
-    def store
-      config.store
-    end
-
-    def cache
-      @cache || CACHE_LOCK.synchronize { @cache ||= Cache.new(store: store, ttl: config.cache_ttl) }
-    end
-
-    # Discard the cache object entirely (used when the store is swapped).
-    def reset_cache!
-      CACHE_LOCK.synchronize { @cache = nil }
-    end
-
-    # Force the next read to rebuild from the store — e.g. after writing
-    # through a console in another process, or in a test. Also clears this
-    # thread's in-transaction-write marker (test suites that wrap examples
-    # in transactions call this between examples).
+    # Force the next read to rebuild from the database. Test suites that roll
+    # each example back should call this between examples.
     def reload!
-      Thread.current[TXN_WRITE_KEY] = nil
-      cache.bust!
+      @overrides = nil
+      @probed_at = nil
+      @version = nil
     end
 
-    # -- reads ---------------------------------------------------------------
+    # The whole change log, newest first.
+    def history(limit: 50) = Record.order(id: :desc).limit(limit)
 
-    # Resolve a dial by key — the primitive under the generated use_<key>
-    # methods, for callers that receive the key at runtime. Scope is passed
-    # as keyword arguments and must name every dimension the dial declares —
-    # no more, no less:
+    # -- writing -------------------------------------------------------------
+
+    # Not public API; Dial#set and Dial#clear call it.
+    def append(key, scope, value, actor)
+      raise Error, "every write needs an actor: (who is turning this dial?)" if actor.nil?
+
+      Record.create!(
+        key: key.to_s,
+        scope: scope,
+        value: value.nil? ? nil : JSON.generate(value),
+        actor_type: (actor.class.name unless actor.is_a?(String)),
+        actor_id: (actor.id.to_s if actor.respond_to?(:id)),
+        actor_label: (actor_label || DEFAULT_ACTOR_LABEL).call(actor).to_s
+      )
+
+      # This process reads its own write immediately. If the write is inside an
+      # application transaction that has not committed yet, reload again once
+      # it settles, so the cache reflects the outcome and not the attempt.
+      reload!
+      ::ActiveRecord.after_all_transactions_commit { reload! }
+    end
+
+    # -- testing -------------------------------------------------------------
+
+    # Pin dial values for the duration of a block, on this thread only — no
+    # database, no cache, no history:
     #
-    #   Dials.get(:signups_enabled)                     # global-only dial
-    #   Dials.get(:merchant_fee_bps, market: "KE")      # varied dial
+    #   Dials.stub(checkout_fee_bps: 999) { ... }
     #
-    # Raises UnknownDial / InvalidScope on misuse; never raises for a merely
-    # missing override (that is what defaults are for).
-    def get(key, **scope)
-      definition = registry.fetch(key)
-      normalized = Scope.validate!(definition, scope, exact: true)
-
-      # After scope validation, so a test override can never mask a read that
-      # would raise in production.
-      pinned = Testing.override_for(definition.key)
-      return pinned.first if pinned
-
-      Resolver.resolve(definition, normalized, current_snapshot)
-    end
-
-    # The full change log, newest first. `key:` filters to one dial.
-    def changes(key: nil, limit: 50)
-      key = registry.fetch(key).key if key
-      store.changes(key: key, limit: limit)
-    end
-
-    # -- writes --------------------------------------------------------------
-
-    # Store an override by key — the primitive under the generated
-    # adjust_<key> methods. With no scope, overrides the global; with a
-    # scope, creates or updates the variation for exactly that scope. The
-    # value is validated against the dial's type and bounds; `actor:` is
-    # required and lands in the change log.
-    def set(key, value, actor:, scope: nil)
-      definition = registry.fetch(key)
-      actor_attrs = Actor.normalize(actor)
-      definition.validate_value!(value)
-
-      if scope.nil? || scope.empty?
-        store.set_global(definition.key, value, actor_attrs)
-      else
-        raise InvalidScope, "dial #{definition.key} declares no variants" unless definition.variants?
-
-        normalized = Scope.validate!(definition, scope, exact: true)
-        store.set_variation(definition.key, Scope.canonical(normalized), value, actor_attrs)
+    # Values are validated, so a test cannot pin something production could
+    # never hold.
+    def stub(values)
+      pinned = values.to_h do |key, value|
+        dial = self[key]
+        [dial.key, dial.cast(value)]
       end
 
-      after_write
-      value
+      previous = Thread.current[STUBS]
+      Thread.current[STUBS] = (previous || {}).merge(pinned)
+      yield
+    ensure
+      Thread.current[STUBS] = previous
     end
 
-    # Remove an override by key — the primitive under the generated
-    # clear_<key> methods — returning resolution to the next layer down: a
-    # cleared variation inherits the global; a cleared global inherits the
-    # code default. Returns true if an override existed. Clearing what is not
-    # there is a no-op (and logs nothing).
-    def clear(key, actor:, scope: nil)
-      definition = registry.fetch(key)
-      actor_attrs = Actor.normalize(actor)
+    def stubs = Thread.current[STUBS]
 
-      removed =
-        if scope.nil? || scope.empty?
-          store.clear_global(definition.key, actor_attrs)
-        else
-          normalized = Scope.validate!(definition, scope, exact: true)
-          store.clear_variation(definition.key, Scope.canonical(normalized), actor_attrs)
-        end
-
-      after_write
-      removed
+    # Test hook: forget every declaration and its generated reader.
+    def reset!
+      Readers.instance_methods(false).each { |name| Readers.send(:remove_method, name) }
+      registry.clear
+      reload!
     end
 
     private
 
-    def after_write
-      cache.bust!
-      return unless store_transaction_open?
+    def probe_due?
+      return true if cache_ttl.to_f <= 0
 
-      # The write is inside an application transaction and not committed
-      # yet. Two things follow. This thread's reads must bypass the shared
-      # cache until the transaction closes (see current_snapshot). And the
-      # bust above happened PRE-commit — another thread can legitimately
-      # republish the pre-transaction state before the commit lands — so the
-      # cache must be busted again ON commit, or a writer that never reads
-      # again would leave every process serving the old value until the TTL
-      # probe notices (forever, with ttl = nil). On rollback the hook is
-      # discarded: the shared cache never held the transaction's data.
-      Thread.current[TXN_WRITE_KEY] = true
-      store.after_commit { cache.bust! } if store.respond_to?(:after_commit)
+      @probed_at.nil? || (monotonic - @probed_at) >= cache_ttl
     end
 
-    def current_snapshot
-      if Thread.current[TXN_WRITE_KEY]
-        return cache.uncached_snapshot if store_transaction_open?
-
-        # The transaction closed (committed or rolled back). Rejoin the
-        # shared cache, busting first so the next snapshot reflects the
-        # outcome rather than anything published mid-transaction.
-        Thread.current[TXN_WRITE_KEY] = nil
-        cache.bust!
-      end
-
-      cache.snapshot
-    end
-
-    def store_transaction_open?
-      s = store
-      s.respond_to?(:transaction_open?) && s.transaction_open?
-    end
+    def monotonic = Process.clock_gettime(Process::CLOCK_MONOTONIC)
   end
 
-  @registry = Registry.new
-  @config = Config.new
-end
-
-begin
-  require "rails/railtie"
-  require_relative "dials/railtie"
-rescue LoadError
-  nil
-rescue StandardError => e
-  # A broken or incompatible Rails installation must not stop the core gem
-  # from loading — Rails integration is opportunistic, never required.
-  warn "[dials] skipping Rails integration (#{e.class}: #{e.message})"
+  self.cache_ttl = 5.0
 end

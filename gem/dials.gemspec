@@ -8,19 +8,22 @@ Gem::Specification.new do |spec|
   spec.authors = ["Keith Gould"]
   spec.email = ["opensource@zarpay.app"]
 
-  spec.summary = "Operator-adjustable values with per-variant overrides, attribution, and caching."
+  spec.summary = "Constants you can turn without a deploy."
   spec.description = <<~TEXT
     Dials turns hardcoded constants into operator-adjustable values without
-    giving up code review as the source of truth. Each dial is declared in
-    code with a default, a type, bounds, and optional variant dimensions
-    (per market, per platform, ...); runtime overrides live in three small
-    database tables, resolve variation → global override → code default,
-    are served from a per-process cache, and every write is attributed in
-    an append-only change log.
+    giving up code review as the source of truth. A dial is declared in code
+    with a default, a type, and optionally the dimensions it may vary along
+    (per market, per platform, ...). Overrides live in one append-only table
+    that is the change log and the current state at the same time, resolve
+    most-specific-scope-first, are served from a per-process cache, and carry
+    the actor who made them.
   TEXT
   spec.homepage = "https://github.com/zarpay/dials"
   spec.license = "MIT"
   spec.required_ruby_version = ">= 3.2"
+
+  spec.add_dependency "activerecord", ">= 7.2"
+  spec.add_dependency "literal", "~> 1.9"
 
   spec.metadata = {
     "bug_tracker_uri" => "https://github.com/zarpay/dials/issues",

@@ -1,43 +1,26 @@
 # frozen_string_literal: true
 
-require "dials/active_record"
-
-Dials.configure do |config|
-  # Where values live. :active_record uses the tables created by
-  # `rails g dials:install`; :memory keeps everything in-process (handy in
-  # test environments that never exercise persistence).
-  config.store = :active_record
-
-  # Seconds between cache staleness probes (one cheap query per process per
-  # interval). 0 probes on every read; nil never probes.
-  # config.cache_ttl = 5.0
-
-  # How an actor is rendered in the change log.
-  # config.actor_label = ->(actor) { actor.email }
+Dials.define do
+  # A dial needs a key, a default, and a type. Anything that answers `===` is
+  # a type: a class, a range, a regexp, an Array of allowed values, or one of
+  # Literal's types, which are available inside this block.
+  #
+  #   dial :signups_enabled, default: true, type: _Boolean
+  #
+  #   dial :checkout_fee_bps, default: 250, type: _Integer(1..10_000),
+  #        unit: "bps",
+  #        description: "Fee charged at checkout.",
+  #        variants: { market: %w[KE NG BD] }
+  #
+  # Declaring `variants:` is the arming gate: a dial without them is
+  # global-only by construction, and adding one belongs in the same change as
+  # the code that reads the varied value.
 end
 
-# Declare your dials. A dial with no `variants:` is global-only by
-# construction. Declaring `variants:` is the arming gate — add it in the same
-# change as the code that reads the varied value.
-#
-# Value constraints are JSON Schema keywords, snake_cased (minimum:,
-# maximum:, enum:, pattern:, min_length:, properties:/required: for :json) —
-# the vocabulary you already know from JSON Schema and OpenAPI. `validate:`
-# takes a callable for rules a schema cannot express.
-#
-# Each declaration generates the dial's methods, e.g. for :merchant_fee_bps:
-#   Dials.use_merchant_fee_bps(market: "KE")
-#   Dials.adjust_merchant_fee_bps(90, actor: current_admin, market: "KE")
-#   Dials.clear_merchant_fee_bps(actor: current_admin, market: "KE")
-Dials.define do
-  # dial :merchant_fee_bps, default: 100,
-  #      type: :integer,
-  #      minimum: 1,
-  #      maximum: 10_000,
-  #      unit: "bps",
-  #      description: "Fee charged to merchants, in basis points.",
-  #      variants: { market: { enum: %w[KE NG BD] } }
+Dials.configure do |config|
+  # Seconds before this process checks for writes made by another one.
+  config.cache_ttl = 5.0
 
-  # dial :signups_enabled, default: true, type: :boolean,
-  #      description: "Global kill switch for new signups."
+  # How an actor is labelled in the change log.
+  # config.actor_label = ->(actor) { actor.email }
 end

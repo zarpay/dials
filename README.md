@@ -4,25 +4,25 @@
 [![License](https://img.shields.io/github/license/zarpay/dials)](https://github.com/zarpay/dials/blob/main/LICENSE.txt)
 [![Ruby](https://img.shields.io/badge/Ruby-%3E%3D%203.2-red)](https://rubygems.org)
 
+> **Branch note — `explore/minimal-rewrite`.** `gem/` has been rewritten from
+> scratch as a minimal alternative: one table instead of three, Literal for
+> typing, and a single `Dials::Dial` object per dial. `demo/` and `docs/` still
+> describe the previous design and no longer match the gem.
+
 `dials` is a Ruby gem for operator-adjustable values: constants you can turn
-without a deploy. A dial is declared in code with a default, a type,
-JSON-Schema-style constraints, and optional variant dimensions (per market,
-per platform, ...); runtime
-overrides live in three small database tables, resolve
-**variation → global override → code default**, are served from a
-per-process cache, and every write is attributed in an append-only change
-log.
+without a deploy. A dial is declared in code with a default and a type;
+runtime overrides live in **one append-only table**, resolve most-specific-scope
+first, are served from a per-process cache, and carry the actor who made them.
 
 ```ruby
 Dials.define do
-  dial :checkout_fee_bps, default: 250,
-       type: :integer, minimum: 1, maximum: 10_000, unit: "bps",
-       variants: { market: { enum: %w[KE NG BD] } }
+  dial :checkout_fee_bps, default: 250, type: _Integer(1..10_000),
+       unit: "bps", variants: { market: %w[KE NG BD] }
 end
 
-Dials.use_checkout_fee_bps(market: "KE")                       # => 250
-Dials.adjust_checkout_fee_bps(120, actor: admin, market: "BD")
-Dials.use_checkout_fee_bps(market: "BD")                       # => 120
+Dials.checkout_fee_bps.for(market: "KE")          # => 250
+Dials.checkout_fee_bps.set(120, market: "BD", actor: admin)
+Dials.checkout_fee_bps.for(market: "BD")          # => 120
 ```
 
 ## Repository layout

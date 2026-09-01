@@ -2,6 +2,62 @@
 
 ## [Unreleased]
 
+### 2.0.0.alpha — the minimal rewrite
+
+A ground-up reimplementation of the same idea in roughly a fifth of the code.
+Everything below is breaking.
+
+- **One table instead of three.** `dials`, `dial_variations`, and
+  `dial_changes` collapse into a single append-only `dials` table. Every set
+  and clear inserts a row; the newest row per `(key, scope)` is the current
+  value, and a NULL value is a tombstone. The change log and the state are now
+  the same thing, writers cannot conflict (there is no upsert to race), and the
+  row count is the cache's version counter. The parent/child foreign key, the
+  retry-on-`RecordNotUnique` logic, and the "destroy the orphaned parent" rule
+  all cease to exist along with the second table.
+- **One object per dial.** `Dials.checkout_fee_bps` returns a `Dials::Dial`
+  carrying both the declaration and the operations:
+
+  ```ruby
+  Dials.checkout_fee_bps.for(market: "KE")                    # was Dials.use_checkout_fee_bps(market: "KE")
+  Dials.checkout_fee_bps.set(120, market: "BD", actor: admin) # was Dials.adjust_checkout_fee_bps(...)
+  Dials.checkout_fee_bps.clear(market: "BD", actor: admin)    # was Dials.clear_checkout_fee_bps(...)
+  ```
+
+  One generated method per dial instead of three, and `Dials[:key]` replaces
+  `Dials.get`/`.set`/`.clear` for dynamic access. `Dial#value` is the global
+  read, `Dial#overrides` lists what is stored, `Dial#history` is its log, and
+  `Dial#cast` validates a candidate value for a form without writing it.
+- **Types are `===`, via Literal.** `type:` and each variant dimension now take
+  anything that answers `===`: a class, a range, a regexp, an Array of allowed
+  values, or a [Literal](https://github.com/joeldrapper/literal) type
+  (`_Integer(1..10_000)`, `_Boolean`, `_JSONData`), which are in scope inside
+  the `define` block. This replaces the `:integer`/`:json` type symbols, the
+  whole JSON-Schema constraint vocabulary (`minimum:`, `pattern:`,
+  `properties:`, ...), `validate:`, and `Dimension`/`Schema` — about 300 lines
+  of declaration machinery for one operator.
+- **Resolution is one rule, not a three-layer ladder.** A stored scope matches
+  when every pair it names is in the request; the most specific match wins.
+  The global override is no longer a special case — it is the candidate that
+  names no dimensions. Partial scopes now work on writes as well as reads:
+  `set(150, platform: "ios")` covers every market.
+- **ActiveRecord is the only store.** The pluggable store interface and the
+  in-memory store are gone; the gem's own suite runs against real SQLite, so it
+  exercises the table that ships.
+- **`Dials.stub`** replaces `Dials::Testing.with_overrides`.
+- **Configuration is two accessors** — `cache_ttl` and `actor_label` — on
+  `Dials` itself. The `Config` class, the `Railtie`, `Snapshot`, `Resolver`,
+  `Registry`, `Actor`, `Freeze`, and `ChangeRecord` are all gone.
+
+**Deliberately not carried over:** last-known-good serving when the database is
+unreachable (a failed read now raises), the single-flight/generation-counter
+guarding around cache rebuilds (a concurrent rebuild may republish a snapshot up
+to `cache_ttl` stale), corrupt-row quarantining, and the thread-local
+in-transaction read isolation (a rolled-back write can outlive its example in
+the cache unless the suite calls `Dials.reload!`).
+
+## Previous design
+
 - **Breaking: constraints now speak JSON Schema; `bounds:` is gone.**
   Declarations take the standard's keywords directly (snake_cased):
   `minimum:`/`maximum:`/`exclusive_minimum:`/`exclusive_maximum:`/
