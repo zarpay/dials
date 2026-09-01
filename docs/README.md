@@ -22,7 +22,7 @@ npm run preview   # serve the production build locally
 |---|---|
 | `index.md` | Landing page |
 | `getting-started/` | Quick start |
-| `concepts/` | The dial model, variants/scopes, caching, change log, pattern boundary |
+| `concepts/` | The dial model, dimensions/scopes, caching, change log, pattern boundary |
 | `guides/` | Install, retrofits, write surface, testing |
 | `design/` | Design decisions and comparisons to alternatives |
 | `reference/` | API reference |

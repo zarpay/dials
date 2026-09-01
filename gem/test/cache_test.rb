@@ -15,7 +15,7 @@ class CacheTest < Minitest::Test
   # Simulates another process writing to the shared store: mutate the store
   # directly, bypassing Dials.set (which would bust the local cache).
   def foreign_write(value)
-    Dials.store.set_global(:fee, value, ACTOR_ATTRS)
+    Dials.store.set_override(:fee, Dials::Scope::GLOBAL, value, ACTOR_ATTRS)
   end
 
   def test_ttl_nil_never_probes
@@ -151,7 +151,7 @@ class CacheTest < Minitest::Test
     # cache. The rebuild's snapshot predates that write; publishing it would
     # hide the write until the next probe (forever, with ttl = nil).
     trap.on_state = lambda do
-      trap.set_global(:fee, 999, ACTOR_ATTRS)
+      trap.set_override(:fee, Dials::Scope::GLOBAL, 999, ACTOR_ATTRS)
       Dials.cache.bust!
     end
 

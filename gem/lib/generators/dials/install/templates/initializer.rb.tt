@@ -22,8 +22,8 @@ Dials.configure do |config|
   # config.default_actor = -> { ENV.fetch("USER", "console") }
 end
 
-# Declare your dials. A dial with no `variants:` is global-only by
-# construction. Declaring `variants:` is the arming gate — add it in the same
+# Declare your dials. A dial with no `dimensions:` is global-only by
+# construction. Declaring `dimensions:` is the arming gate — add it in the same
 # change as the code that reads the varied value.
 #
 # Value constraints are JSON Schema keywords, snake_cased (minimum:,
@@ -42,7 +42,7 @@ Dials.define do
   #      maximum: 10_000,
   #      unit: "bps",
   #      description: "Fee charged to merchants, in basis points.",
-  #      variants: { market: { enum: %w[KE NG BD] } }
+  #      dimensions: { market: { enum: %w[KE NG BD] } }
 
   # dial :signups_enabled, default: true, type: :boolean,
   #      description: "Global kill switch for new signups."

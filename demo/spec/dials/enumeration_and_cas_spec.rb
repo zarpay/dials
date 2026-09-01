@@ -2,26 +2,26 @@
 
 require "rails_helper"
 
-# The enumeration API (Dials.variations / Dials.overview) and stale-write
+# The enumeration API (Dials.scoped_overrides / Dials.overview) and stale-write
 # protection (expected_version:), proven against the real ActiveRecord store.
 RSpec.describe "Dial enumeration and stale-write protection", type: :model do
   let(:actor) { AdminUser.new(id: 99, email: "ops@bazario.example") }
 
-  describe "Dials.variations" do
+  describe "Dials.scoped_overrides" do
     it "answers 'which markets have an override for this dial'" do
       Dials.adjust_checkout_fee_bps(120, actor: actor, market: "BD")
       Dials.adjust_checkout_fee_bps(180, actor: actor, market: "NG")
 
-      expect(Dials.variations(:checkout_fee_bps)).to eq(
+      expect(Dials.scoped_overrides(:checkout_fee_bps)).to eq(
         { market: "BD" } => 120,
         { market: "NG" } => 180
       )
-      expect(Dials.variations(:checkout_fee_bps).keys.map { |s| s[:market] }).to contain_exactly("BD", "NG")
+      expect(Dials.scoped_overrides(:checkout_fee_bps).keys.map { |s| s[:market] }).to contain_exactly("BD", "NG")
     end
 
     it "returns {} for dials with nothing stored and raises for unknown keys" do
-      expect(Dials.variations(:signups_enabled)).to eq({})
-      expect { Dials.variations(:nope) }.to raise_error(Dials::UnknownDial)
+      expect(Dials.scoped_overrides(:signups_enabled)).to eq({})
+      expect { Dials.scoped_overrides(:nope) }.to raise_error(Dials::UnknownDial)
     end
   end
 
@@ -40,7 +40,7 @@ RSpec.describe "Dial enumeration and stale-write protection", type: :model do
 
       threshold = overview.dials.find { |d| d.key == :free_delivery_threshold }
       expect(threshold.global_override?).to be(false)
-      expect(threshold.variations).to eq({ { market: "KE", platform: "ios" } => 2_500 })
+      expect(threshold.scoped_overrides).to eq({ { market: "KE", platform: "ios" } => 2_500 })
       expect(threshold.json_schema).to include("type" => "integer", "minimum" => 0)
     end
   end

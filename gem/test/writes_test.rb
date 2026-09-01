@@ -21,13 +21,13 @@ class WritesTest < Minitest::Test
     assert_raises(Dials::InvalidValue) { Dials.set(:merchant_fee_bps, nil, actor: ACTOR) }
   end
 
-  def test_variation_bounds_apply_same_as_global
+  def test_scoped_writes_validate_same_as_global
     assert_raises(Dials::InvalidValue) do
       Dials.set(:merchant_fee_bps, 10_001, scope: { market: "KE" }, actor: ACTOR)
     end
   end
 
-  def test_set_with_scope_on_variantless_dial_rejected
+  def test_set_with_scope_on_dimensionless_dial_rejected
     assert_raises(Dials::InvalidScope) do
       Dials.set(:signups_enabled, false, scope: { market: "KE" }, actor: ACTOR)
     end
@@ -47,16 +47,16 @@ class WritesTest < Minitest::Test
     changes = Dials.changes(key: :merchant_fee_bps)
     assert_equal 3, changes.length
 
-    clear_change, variation_change, global_change = changes
+    clear_change, scoped_change, global_change = changes
 
     assert_equal "clear", clear_change.action
     assert_equal({ market: "KE" }, clear_change.scope)
     assert_equal 90, clear_change.old_value
     assert_nil clear_change.new_value
 
-    assert_equal "set", variation_change.action
-    assert_nil variation_change.old_value
-    assert_equal 90, variation_change.new_value
+    assert_equal "set", scoped_change.action
+    assert_nil scoped_change.old_value
+    assert_equal 90, scoped_change.new_value
 
     assert_equal "set", global_change.action
     assert global_change.global?

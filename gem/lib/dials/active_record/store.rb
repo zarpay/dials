@@ -52,11 +52,11 @@ module Dials
         # carries an older version than its data, and the next probe sees the
         # version move and rebuilds — stale in the safe direction only. The
         # data itself is ONE query over one table, so a snapshot can never
-        # mix pre-write globals with post-write variations.
+        # mix pre-write globals with post-write scoped overrides.
         current_version = version
 
         globals = {}
-        variations = {}
+        scoped = {}
         row_versions = {}
         Override.pluck(:key, :scope, :value, :version).each do |key, scope, raw, row_version|
           value = decode_row(raw, "dials(#{key}, #{scope})")
@@ -65,14 +65,14 @@ module Dials
           if scope == Scope::GLOBAL
             globals[key.to_sym] = value
           elsif valid_scope_string?(key, scope)
-            (variations[key.to_sym] ||= {})[scope] = value
+            (scoped[key.to_sym] ||= {})[scope] = value
           else
             next
           end
           (row_versions[key.to_sym] ||= {})[scope] = row_version
         end
 
-        { globals: globals, variations: variations, version: current_version, row_versions: row_versions }
+        { globals: globals, scoped_overrides: scoped, version: current_version, row_versions: row_versions }
       end
 
       # The change log is append-only, so its row count moves on every
@@ -120,20 +120,16 @@ module Dials
         end
       end
 
-      def set_global(key, value, actor, expected_version: nil)
-        write { set_override(key, Scope::GLOBAL, nil, value, actor, expected_version) }
+      # The two mutations. `canonical_scope` is always a canonical string —
+      # Scope::GLOBAL for the global override. The change log records nil
+      # scope for globals (history's stable encoding), derived in the apply
+      # steps.
+      def set_override(key, canonical_scope, value, actor, expected_version: nil)
+        write { apply_set(key, canonical_scope, value, actor, expected_version) }
       end
 
-      def clear_global(key, actor, expected_version: nil)
-        write { clear_override(key, Scope::GLOBAL, nil, actor, expected_version) }
-      end
-
-      def set_variation(key, canonical_scope, value, actor, expected_version: nil)
-        write { set_override(key, canonical_scope, canonical_scope, value, actor, expected_version) }
-      end
-
-      def clear_variation(key, canonical_scope, actor, expected_version: nil)
-        write { clear_override(key, canonical_scope, canonical_scope, actor, expected_version) }
+      def clear_override(key, canonical_scope, actor, expected_version: nil)
+        write { apply_clear(key, canonical_scope, actor, expected_version) }
       end
 
       def changes(key: nil, limit: 50)
@@ -167,7 +163,8 @@ module Dials
       # change-log row is created BEFORE the guarded statement so its id can
       # stamp the row's new version; a guard that matches zero rows raises,
       # rolling the log entry back with everything else.
-      def set_override(key, stored_scope, logged_scope, value, actor, expected)
+      def apply_set(key, stored_scope, value, actor, expected)
+        logged_scope = stored_scope == Scope::GLOBAL ? nil : stored_scope
         row = Override.find_by(key: key.to_s, scope: stored_scope)
         current = row&.version || 0
         assert_version!(expected, current)
@@ -192,8 +189,10 @@ module Dials
       # at every layer. Clearing what is not there is a no-op and logs
       # nothing; with expected_version: it first proves the caller's picture
       # (a page showing an override that no longer exists is stale).
-      # rubocop:disable-next Naming/PredicateMethod
-      def clear_override(key, stored_scope, logged_scope, actor, expected)
+      # Named for the action, not the boolean return (it mirrors the public
+      # clear, whose return is "did an override exist").
+      def apply_clear(key, stored_scope, actor, expected) # rubocop:disable Naming/PredicateMethod
+        logged_scope = stored_scope == Scope::GLOBAL ? nil : stored_scope
         row = Override.find_by(key: key.to_s, scope: stored_scope)
         current = row&.version || 0
         assert_version!(expected, current)

@@ -12,7 +12,7 @@ RSpec.describe Pricing::QuoteService do
     expect(quote.total_cents).to eq(10_250)
   end
 
-  it "picks up a per-market fee variation without the service changing" do
+  it "picks up a per-market fee override without the service changing" do
     Dials.adjust_checkout_fee_bps(100, actor: actor, market: "BD")
 
     bd = described_class.new(market: "BD", platform: "ios").quote(10_000)

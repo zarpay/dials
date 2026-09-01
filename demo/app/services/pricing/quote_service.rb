@@ -4,7 +4,7 @@ module Pricing
   # Prices a checkout for one order in one (market, platform) context.
   #
   # This is the canonical dial CONSUMER: it never knows whether the value it
-  # reads is the code default, a global override, or a per-market variation —
+  # reads is the code default, a global override, or a per-market override —
   # that layering is the gem's job. It just asks for the value in its context.
   class QuoteService
     Quote = Data.define(:subtotal_cents, :fee_cents, :free_delivery, :total_cents)

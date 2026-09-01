@@ -54,7 +54,7 @@ code:
   canonical encoding of a real value in the scope algebra. The `'XX'`
   objection does not transfer.
 - **The FK invariant enforced less than it advertised.** It guaranteed a
-  variation had a parent *row*, not a parent *override* (variations
+  scoped row had a parent *row*, not a parent *override* (scoped overrides
   legitimately outlive a cleared global) — a mechanical anchor whose
   lifecycle (create-on-first-variation, destroy-with-last-override, the
   `InvalidForeignKey` retry case) was pure bookkeeping cost.
@@ -86,13 +86,13 @@ the gem are invisible to the probe and need `Dials.reload!`.
 
 Multi-dimension dials raise the precedence question (does `{market: KE}`
 beat `{platform: ios}`?). v1 refuses to make operators learn a precedence
-table: a variation names every declared dimension, and either matches
+table: a scoped override names every declared dimension, and either matches
 exactly or the global serves. But the resolver already implements the
 general rule (subset match, most-specific wins, ties by declared dimension
 order), the canonical-scope storage already represents partials, and the
 gem's tests already pin the partial behavior — so enabling partials later
 is deleting a write-side restriction, not a migration. See
-[Variants and Scopes](/concepts/variants-and-scopes).
+[Dimensions and Scopes](/concepts/dimensions-and-scopes).
 
 ## Scope-in-one-column (JSON text), not one column per dimension
 
@@ -157,6 +157,24 @@ silent-nothing this gem's boot checks exist to prevent), and declaring
 and dimension `options:` became `enum:` so the whole declaration speaks one
 vocabulary.
 
+## One vocabulary: dimensions and overrides
+
+Early iterations used three near-synonyms: `variants:` declared a dial's
+axes, `Dimension` was the class those axes became, and "variation" named a
+stored scoped value. The declaration keyword and the docs needed the words
+to define each other ("`variants:` — the dial's variant dimensions"), and
+"variant" collides with the experimentation industry's meaning, where a
+variant is one of the candidate *values* (control/treatment) — the opposite
+end of the idea from an axis.
+
+The vocabulary is now two words for two concepts: a **dimension** is an axis
+a dial varies along (`dimensions:` in the declaration, matching the class
+and the resolution language — a scope names dimensions, most-specific-wins
+counts them), and an **override** is a stored value at a scope — *global*
+(the empty scope) or *scoped*. "Variant" and "variation" survive only in
+historical records (the changelog, this page's history, already-run demo
+migrations); *vary* as a plain verb remains ordinary English.
+
 ## No bundled GUI
 
 The original system's dashboard was a bespoke Rails controller with CAS
@@ -192,14 +210,14 @@ The originating system carried a `country_writable:` flag flipped in the
 same PR as each dial's reader, pinned by a spec — protecting against
 configure-before-consume (a stored value nothing reads yet, waiting to
 surprise whoever ships the reader). The gem keeps the invariant and deletes
-the flag: declaring `variants:` is the gate, and the recommended
+the flag: declaring `dimensions:` is the gate, and the recommended
 registry-integrity spec makes arming a visible diff. Global-only dials fall
-out for free: no declaration, no variations, no flag.
+out for free: no declaration, no scoped overrides, no flag.
 
 ## Stale-write protection is per-override optimistic locking
 
 `expected_version:` compares against the version of the **override being
-written** — the global's, or the named variation's, with
+written** — the global's, or the named scoped override's, with
 `Dials::ABSENT_VERSION` asserting "no override was stored here when I
 looked". Each row carries a version stamp (the id of the change-log entry
 that last wrote it — store-monotonic, so a row deleted and re-created can

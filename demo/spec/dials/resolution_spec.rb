@@ -3,7 +3,7 @@
 require "rails_helper"
 
 # The gem's resolution contract, proven against the real ActiveRecord store:
-#   variation → global override → code default
+#   scoped override → global override → code default
 RSpec.describe "Dial resolution", type: :model do
   let(:actor) { AdminUser.new(id: 99, email: "ops@bazario.example") }
 
@@ -12,11 +12,11 @@ RSpec.describe "Dial resolution", type: :model do
     expect(Dials::ActiveRecord::Override.count).to eq(0)
   end
 
-  it "layers global override and variation, and clears back down layer by layer" do
+  it "layers global and scoped overrides, and clears back down layer by layer" do
     Dials.adjust_checkout_fee_bps(300, actor: actor)
     Dials.adjust_checkout_fee_bps(120, actor: actor, market: "BD")
 
-    expect(Dials.use_checkout_fee_bps(market: "BD")).to eq(120) # variation
+    expect(Dials.use_checkout_fee_bps(market: "BD")).to eq(120) # scoped override
     expect(Dials.use_checkout_fee_bps(market: "KE")).to eq(300) # global override
 
     Dials.clear_checkout_fee_bps(actor: actor, market: "BD")
@@ -26,7 +26,7 @@ RSpec.describe "Dial resolution", type: :model do
     expect(Dials.use_checkout_fee_bps(market: "BD")).to eq(250) # back to code default
   end
 
-  it "keeps a variation alive when the global override is cleared" do
+  it "keeps a scoped override alive when the global is cleared" do
     Dials.adjust_checkout_fee_bps(300, actor: actor)
     Dials.adjust_checkout_fee_bps(120, actor: actor, market: "BD")
     Dials.clear_checkout_fee_bps(actor: actor)

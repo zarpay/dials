@@ -77,12 +77,12 @@ class ActiveRecordStoreTest < Minitest::Test
     assert_equal "150", row.value
   end
 
-  def test_global_and_variations_are_independent_rows
+  def test_global_and_scoped_overrides_are_independent_rows
     Dials.set(:merchant_fee_bps, 150, actor: ACTOR)
     Dials.set(:merchant_fee_bps, 90, scope: { market: "KE" }, actor: ACTOR)
     assert_equal 2, overrides.where(key: "merchant_fee_bps").count
 
-    # Clearing the global deletes exactly its row; the variation survives
+    # Clearing the global deletes exactly its row; the scoped override survives
     # with nothing anchoring it — no parent, no NULL-value bookkeeping.
     Dials.clear(:merchant_fee_bps, actor: ACTOR)
     assert_equal [%w[merchant_fee_bps KE]],
@@ -97,7 +97,7 @@ class ActiveRecordStoreTest < Minitest::Test
     assert_equal 0, overrides.count
   end
 
-  def test_clearing_global_without_variations_removes_the_row
+  def test_clearing_global_without_scoped_overrides_removes_the_row
     Dials.set(:merchant_fee_bps, 150, actor: ACTOR)
     Dials.clear(:merchant_fee_bps, actor: ACTOR)
     assert_equal 0, overrides.count
@@ -140,7 +140,8 @@ class ActiveRecordStoreTest < Minitest::Test
     # Another process's write becomes visible once the probe runs.
     Dials.configure { |c| c.cache_ttl = 0 }
     assert_equal 150, Dials.get(:merchant_fee_bps, market: "KE")
-    store.set_global(:merchant_fee_bps, 175, { actor_type: nil, actor_id: nil, actor_label: "other-process" })
+    store.set_override(:merchant_fee_bps, Dials::Scope::GLOBAL, 175,
+                       { actor_type: nil, actor_id: nil, actor_label: "other-process" })
     assert_equal 175, Dials.get(:merchant_fee_bps, market: "KE")
   end
 
@@ -315,7 +316,7 @@ class ActiveRecordStoreTest < Minitest::Test
     changes_before = Dials::ActiveRecord::Change.count
     assert_raises(Dials::StaleWrite) do
       Dials.adjust_merchant_fee_bps(999, actor: ACTOR, market: "BD",
-                                    expected_version: state.variation_versions[{ market: "BD" }] || Dials::ABSENT_VERSION)
+                                    expected_version: state.scoped_override_versions[{ market: "BD" }] || Dials::ABSENT_VERSION)
     end
 
     assert_equal changes_before, Dials::ActiveRecord::Change.count

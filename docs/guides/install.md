@@ -36,7 +36,7 @@ Dials.define do
   dial :checkout_fee_bps, default: 250,
        type: :integer, minimum: 1, maximum: 10_000, unit: "bps",
        description: "Fee charged on checkout, in basis points.",
-       variants: { market: { enum: %w[KE NG BD] } }
+       dimensions: { market: { enum: %w[KE NG BD] } }
 end
 ```
 
@@ -68,7 +68,7 @@ Consumers never know which layer a value came from. That is the point.
 ## Recommended from day one
 
 - **A registry-integrity spec** pinning your declared dials and which are
-  armed for variation, so arming shows up in review as a failing pin — copy
+  armed with dimensions, so arming shows up in review as a failing pin — copy
   [`demo/spec/dials/registry_spec.rb`](https://github.com/zarpay/dials/blob/main/demo/spec/dials/registry_spec.rb).
 - **The test-suite hygiene line** — see [Testing with Dials](/guides/testing).
 - **A write surface** with your app's auth in front of the write path — see

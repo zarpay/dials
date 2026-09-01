@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+- **Breaking: one vocabulary — `dimensions:` and overrides; "variants" and
+  "variation" retire.** The declaration keyword `variants:` is renamed
+  `dimensions:` (it always declared dimensions — and "variant" collides with
+  the experimentation-industry meaning, where a variant is a candidate
+  VALUE, not an axis). `Definition#variants?` → `#dimensions?`;
+  `Dials.variations(key)` → `Dials.scoped_overrides(key)`;
+  `DialState#variations`/`#variation_versions` →
+  `#scoped_overrides`/`#scoped_override_versions`. The store interface
+  collapses to match the unified model: `set_override`/`clear_override`
+  take a canonical scope (`Scope::GLOBAL` for the global), replacing
+  `set_global`/`clear_global`/`set_variation`/`clear_variation`; the state
+  hash's `variations` key becomes `scoped_overrides`. Prose now says
+  "scoped override" wherever "variation" appeared; the docs page is
+  "Dimensions and Scopes".
 - **Breaking: stale-write tokens are per-override; the `dial_locks` table is
   gone.** `expected_version:` now compares against the override being
   written (the global's token, a variation's token, or

@@ -3,10 +3,10 @@
 require "rails_helper"
 
 # The registry-integrity spec: pins exactly which dials this app declares and
-# which of them are armed for variation. Adding a dial, adding variants to a
-# dial, or widening a dimension's enum makes this spec fail — which is the
-# point: those changes deserve a visible, reviewed diff, because each one
-# changes what operators can do in production.
+# which of them are armed with dimensions. Adding a dial, adding dimensions
+# to a dial, or widening a dimension's enum makes this spec fail — which is
+# the point: those changes deserve a visible, reviewed diff, because each
+# one changes what operators can do in production.
 RSpec.describe "Dial registry", type: :model do
   it "declares exactly the expected dials" do
     expect(Dials.registry.keys).to contain_exactly(
@@ -18,8 +18,8 @@ RSpec.describe "Dial registry", type: :model do
     )
   end
 
-  it "pins which dials are armed for variation, and along which dimensions" do
-    armed = Dials.registry.select(&:variants?).to_h { |d| [d.key, d.dimension_names] }
+  it "pins which dials are armed, and along which dimensions" do
+    armed = Dials.registry.select(&:dimensions?).to_h { |d| [d.key, d.dimension_names] }
     expect(armed).to eq(
       checkout_fee_bps: [:market],
       free_delivery_threshold: %i[market platform],
@@ -28,7 +28,7 @@ RSpec.describe "Dial registry", type: :model do
   end
 
   it "keeps the kill switch global-only" do
-    expect(Dials.registry.fetch(:signups_enabled).variants?).to be(false)
+    expect(Dials.registry.fetch(:signups_enabled).dimensions?).to be(false)
   end
 
   it "pins market and platform enums" do

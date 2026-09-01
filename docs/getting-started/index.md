@@ -29,7 +29,7 @@ Dials.define do
        maximum: 10_000,
        unit: "bps",
        description: "Fee charged on checkout, in basis points.",
-       variants: { market: { enum: %w[KE NG BD] } }
+       dimensions: { market: { enum: %w[KE NG BD] } }
 
   dial :signups_enabled, default: true,
        type: :boolean,
@@ -45,7 +45,7 @@ Each `dial` takes a key and:
 | `type:` | **yes** | `:boolean`, `:integer`, `:float`, `:string`, or `:json` |
 | *constraints* | no | JSON Schema keywords for the type — `minimum:`/`maximum:` for numbers, `min_length:`/`max_length:`/`pattern:` for strings, `enum:` for any type, `properties:`/`required:` for `:json` |
 | `validate:` | no | callable — the escape hatch for rules a schema cannot express |
-| `variants:` | no | the dial's variant dimensions (see below) |
+| `dimensions:` | no | the dial's dimensions (see below) |
 | `label:` / `unit:` / `description:` | no | metadata for the admin surface you build |
 
 A key, a `default:`, and a `type:` make a complete declaration — everything
@@ -59,7 +59,7 @@ declaration can hand its rules to any JSON Schema tooling via
 `definition.to_json_schema` (see the
 [API Reference](/reference/api#constraints)).
 
-A dial with no `variants:` is **global-only**: it can never hold per-scope
+A dial with no `dimensions:` is **global-only**: it can never hold per-scope
 values, which is exactly what you want for a kill switch.
 
 Declaring a dial generates its methods: `use_<key>` to read,
@@ -83,10 +83,10 @@ Reads cost a hash lookup. No query runs per read — see [Caching](/concepts/cac
 ## Write
 
 ```ruby
-# Global override (applies wherever no variation exists):
+# Global override (applies wherever nothing more specific exists):
 Dials.adjust_checkout_fee_bps(300, actor: current_admin)
 
-# Per-market variation:
+# Per-market override:
 Dials.adjust_checkout_fee_bps(120, actor: current_admin, market: "BD")
 
 # Remove overrides (each layer falls back to the one below):
@@ -142,7 +142,7 @@ See [Testing with Dials](/guides/testing) for why.
 
 - [The Dial Model](/concepts/the-dial-model) — the resolution layers and why
   the database stores only overrides
-- [Variants and Scopes](/concepts/variants-and-scopes) — dimensions, enums,
+- [Dimensions and Scopes](/concepts/dimensions-and-scopes) — dimensions, enums,
   and the exact-scope rule
 - [Retrofit a Constant](/guides/retrofit-a-constant) — adopting dials in an
   existing app

@@ -21,7 +21,7 @@ RSpec.describe "Dial caching", type: :model do
 
     # Another process = a write through the store that never touches this
     # process's cache.
-    Dials.store.set_global(:checkout_fee_bps, 400, foreign_actor)
+    Dials.store.set_override(:checkout_fee_bps, Dials::Scope::GLOBAL, 400, foreign_actor)
 
     expect(Dials.use_checkout_fee_bps(market: "KE")).to eq(250) # still cached
     Dials.reload!
@@ -31,7 +31,7 @@ RSpec.describe "Dial caching", type: :model do
   it "converges automatically with ttl 0 (probe every read)" do
     Dials.config.cache_ttl = 0
     expect(Dials.use_checkout_fee_bps(market: "KE")).to eq(250)
-    Dials.store.set_global(:checkout_fee_bps, 400, foreign_actor)
+    Dials.store.set_override(:checkout_fee_bps, Dials::Scope::GLOBAL, 400, foreign_actor)
     expect(Dials.use_checkout_fee_bps(market: "KE")).to eq(400)
   end
 

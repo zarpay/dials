@@ -12,8 +12,8 @@ configuration systems get weird.
 
 ## Partial scopes
 
-**The idea.** A dial declares `variants: { market: ..., platform: ... }` and
-an operator writes a variation for `{ market: "KE" }` alone — meaning "KE,
+**The idea.** A dial declares `dimensions: { market: ..., platform: ... }` and
+an operator writes an override for `{ market: "KE" }` alone — meaning "KE,
 every platform" — instead of one row per platform.
 
 **What already exists.** More than you'd expect: the resolver already
@@ -34,11 +34,12 @@ answer. Until a dial exists whose scope fan-out is genuinely painful
 
 **The idea.** On a varied dial, `Dials.use_<key>` without scope raises by
 design — a scopeless read is usually a context-threading shortcut that
-silently serves the wrong value once variations exist (see
-[Variants and Scopes](/concepts/variants-and-scopes)). But there may be
+silently serves the wrong value once scoped overrides exist (see
+[Dimensions and Scopes](/concepts/dimensions-and-scopes)). But there may be
 legitimate "give me the fallback layer" reads: an ops dashboard showing the
 default, a report about the configuration itself. `Dials.global(:key)` would
-answer *global override → code default*, deliberately ignoring variations —
+answer *global override → code default*, deliberately ignoring scoped
+overrides —
 explicit, greppable, reviewable, while accidental omission stays an error.
 
 **Why it waits.** It's unclear anyone wants the global *as a value* rather

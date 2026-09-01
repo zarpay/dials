@@ -7,7 +7,7 @@
 Runs the block against the registry. Blocks accumulate; a duplicate key
 raises `Dials::DuplicateDial` at boot.
 
-### `dial(key, default:, type:, label: nil, unit: nil, description: nil, variants: nil, validate: nil, **constraints)`
+### `dial(key, default:, type:, label: nil, unit: nil, description: nil, dimensions: nil, validate: nil, **constraints)`
 
 Declares one dial (inside a `define` block). Raises
 `Dials::InvalidDefinition` at boot when the declaration is malformed, a
@@ -26,7 +26,7 @@ declaration time — real methods, not `method_missing`.
 | `label:` | String | no | defaults to the humanized key |
 | `unit:` | String | no | display metadata (`"bps"`, `"cents"`, `"hours"`) |
 | `description:` | String | no | shown on admin surfaces; write one |
-| `variants:` | Hash or Array | no | variant dimensions; see below |
+| `dimensions:` | Hash or Array | no | dimensions; see below |
 | `validate:` | callable | no | escape hatch for rules a schema cannot express; returns truthy for storable. Not serializable — prefer the schema keywords |
 | *constraints* | keywords | no | value constraints in JSON Schema's vocabulary; see below |
 
@@ -64,14 +64,14 @@ a `type:` — one of `:boolean` `:integer` `:number` `:string` `:object`
 Declaring `properties:`/`required:` pins a `:json` dial's values to JSON
 objects; keys not named in `properties:` are allowed.
 
-`variants:` shapes, all equivalent where applicable:
+`dimensions:` shapes, all equivalent where applicable:
 
 ```ruby
-variants: { market: { enum: %w[KE NG BD] } }      # canonical
-variants: { market: %w[KE NG BD] }                # shorthand: enum array
-variants: { market: -> { Market.pluck(:code) } }  # callable, resolved lazily
-variants: { locale: {} }                          # open: any non-empty string
-variants: [:market, :platform]                    # names only, all open
+dimensions: { market: { enum: %w[KE NG BD] } }      # canonical
+dimensions: { market: %w[KE NG BD] }                # shorthand: enum array
+dimensions: { market: -> { Market.pluck(:code) } }  # callable, resolved lazily
+dimensions: { locale: {} }                          # open: any non-empty string
+dimensions: [:market, :platform]                    # names only, all open
 ```
 
 `actor` is a reserved dimension name — on the generated `adjust_`/`clear_`
@@ -88,7 +88,7 @@ Dials.use_signups_enabled                  # global-only dial
 Dials.use_checkout_fee_bps(market: "KE")   # varied dial
 ```
 
-Resolves variation → global override → code default. Scope must name every
+Resolves scoped override → global override → code default. Scope must name every
 declared dimension exactly (values compared as strings). Raises
 `Dials::InvalidScope`. Returned `:json` values are deep-frozen; hash keys
 are strings.
@@ -99,17 +99,17 @@ The key-taking primitive under `use_<key>`, for code that receives the key
 at runtime (an admin surface, a console). Same semantics; also raises
 `Dials::UnknownDial` for an undeclared key.
 
-### `Dials.variations(key) → { scope => value }`
+### `Dials.scoped_overrides(key) → { scope => value }`
 
-One dial's stored variations, keyed by **parsed** scope hashes (never
+One dial's stored scoped overrides, keyed by **parsed** scope hashes (never
 canonical scope strings) — "which markets have an override for this dial":
 
 ```ruby
-Dials.variations(:checkout_fee_bps)   # => { { market: "BD" } => 120,
+Dials.scoped_overrides(:checkout_fee_bps)   # => { { market: "BD" } => 120,
                                       #      { market: "NG" } => 180 }
 ```
 
-`{}` when nothing is stored (or the dial declares no variants); raises
+`{}` when nothing scoped is stored (or the dial declares no dimensions); raises
 `Dials::UnknownDial` for undeclared keys. Reads through the same snapshot
 path as every other read (in-transaction rule included); the result is
 deep-frozen.
@@ -117,7 +117,7 @@ deep-frozen.
 ### `Dials.overview → Overview`
 
 Every registered dial's full state — the `Definition` (with `json_schema`),
-whether a global override exists and its value, and its variations — read
+whether a global override exists and its value, and its scoped overrides — read
 from ONE snapshot in one call, so an admin page renders a coherent picture
 stamped with a single version:
 
@@ -132,8 +132,8 @@ overview.dials.each do |state|
   state.global_value                # ...because false ≠ "no override"
   state.global_version              # the global's stale-write token
                                     # (Dials::ABSENT_VERSION when not stored)
-  state.variations                  # { parsed scope => value }
-  state.variation_versions          # { parsed scope => stale-write token }
+  state.scoped_overrides                  # { parsed scope => value }
+  state.scoped_override_versions          # { parsed scope => stale-write token }
 end
 ```
 
@@ -148,7 +148,7 @@ Dials.registry.keys                 # [:checkout_fee_bps, ...]
 Dials.registry.fetch(:key)          # Definition (raises UnknownDial)
 Dials.registry.defined?(:key)       # true/false
 definition.key .default .type .label .unit .description
-definition.variants?                # any dimensions?
+definition.dimensions?              # any dimensions?
 definition.dimension_names          # [:market, :platform]
 definition.dimensions               # [Dimension(name, enum), ...]
 definition.problems_for(value)      # [] when storable, else messages
@@ -178,10 +178,10 @@ The generated writer:
 
 ```ruby
 Dials.adjust_checkout_fee_bps(300, actor: current_admin)                # global
-Dials.adjust_checkout_fee_bps(120, actor: current_admin, market: "BD")  # variation
+Dials.adjust_checkout_fee_bps(120, actor: current_admin, market: "BD")  # scoped
 ```
 
-Stores an override — global with no scope keywords, a variation with them.
+Stores an override — global with no scope keywords, scoped with them.
 Validates type, schema, and scope; requires `actor:` (which is why `actor`
 is a reserved dimension name). Appends to the change log and busts the local
 cache. Raises `Dials::InvalidValue`, `Dials::InvalidScope`,
@@ -191,7 +191,7 @@ cache. Raises `Dials::InvalidValue`, `Dials::InvalidScope`,
 
 Every write path (generated and primitive) accepts `expected_version:`,
 which makes the write **compare-and-swap against the override it targets**
-(the global when there are no scope keywords, the named variation
+(the global when there are no scope keywords, the named scoped override
 otherwise): pass that override's token from `Dials.overview` — or
 `Dials::ABSENT_VERSION` when the page showed no override stored — and the
 write is refused with `Dials::StaleWrite`, unapplied and with nothing
@@ -287,10 +287,10 @@ log.
 
 A store is any object implementing the interface documented in
 [`Dials::Stores::Memory`](https://github.com/zarpay/dials/blob/main/gem/lib/dials/stores/memory.rb)
-(`state`, `version`, `override_version`, `set_global`, `clear_global`,
-`set_variation`, `clear_variation`, `changes`). Shipped: `Stores::Memory`
-(default) and `Stores::ActiveRecordStore` (via
-`require "dials/active_record"`).
+(`state`, `version`, `override_version`, `set_override`, `clear_override`,
+`changes` — the global override is the one at `Scope::GLOBAL`, the canonical
+empty scope). Shipped: `Stores::Memory` (default) and
+`Stores::ActiveRecordStore` (via `require "dials/active_record"`).
 
 ## Generator
 

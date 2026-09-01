@@ -9,10 +9,10 @@ module Dials
   # The canonical form is a JSON object with sorted keys and string values —
   # `{market: :KE}` and `{"market" => "KE"}` both canonicalize to
   # `{"market":"KE"}` — so a scope written once can never be re-stored under a
-  # cosmetically different spelling. Uniqueness lives on (dial, canonical
+  # cosmetically different spelling. Uniqueness lives on (key, canonical
   # scope) in whatever store persists it.
   #
-  # v1 write rule: a variation's scope names ALL of its dial's declared
+  # v1 write rule: a scoped override names ALL of its dial's declared
   # dimensions (exact scope). The matching code in Resolver is already
   # general (subset match, most-specific wins), so partial scopes are a
   # planned write-side relaxation, not a redesign. See docs/design.
@@ -75,7 +75,7 @@ module Dials
       if definition.dimensions.empty?
         return normalized if normalized.empty?
 
-        raise InvalidScope, "dial #{definition.key} declares no variants; scope #{normalized.inspect} is not allowed"
+        raise InvalidScope, "dial #{definition.key} declares no dimensions; scope #{normalized.inspect} is not allowed"
       end
 
       declared = definition.dimensions.to_h { |d| [d.name, d] }

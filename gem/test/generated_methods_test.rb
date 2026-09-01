@@ -100,7 +100,7 @@ class GeneratedMethodsTest < Minitest::Test
 
   def test_actor_is_a_reserved_dimension_name
     error = assert_raises(Dials::InvalidDefinition) do
-      Dials.define { dial :fee, default: 1, type: :integer, variants: { actor: %w[a b] } }
+      Dials.define { dial :fee, default: 1, type: :integer, dimensions: { actor: %w[a b] } }
     end
     assert_match(/actor is a reserved dimension name/, error.message)
   end

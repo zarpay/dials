@@ -14,7 +14,7 @@ module Admin
   # Validation: the gem raises typed errors; they render as 422/404/409 here.
   #
   # Stale-write protection: each override in the index payload carries its
-  # own version token (`global_version`, and `version` on every variation;
+  # own version token (`global_version`, and `version` on every scoped override;
   # `absent_version` is the token for overrides the page shows as not
   # stored). A client that echoes the right token back as `expected_version`
   # can never overwrite a change it didn't see — the gem refuses with
@@ -113,8 +113,8 @@ module Admin
         global_override: state.global_override?,
         global_value: state.global_value,
         global_version: state.global_version,
-        variations: state.variations.map do |scope, value|
-          { scope: scope, value: value, version: state.variation_versions[scope] }
+        scoped_overrides: state.scoped_overrides.map do |scope, value|
+          { scope: scope, value: value, version: state.scoped_override_versions[scope] }
         end
       }
     end

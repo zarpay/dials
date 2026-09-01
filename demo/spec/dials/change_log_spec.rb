@@ -25,7 +25,7 @@ RSpec.describe "Dial change log", type: :model do
     expect(changes.map(&:old_value)).to eq([400, 300, nil])
   end
 
-  it "records the scope on variation changes" do
+  it "records the scope on scoped-override changes" do
     Dials.adjust_checkout_fee_bps(120, actor: actor, market: "BD")
     change = Dials.changes.first
     expect(change.scope).to eq(market: "BD")

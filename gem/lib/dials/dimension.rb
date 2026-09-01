@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 module Dials
-  # One variant dimension of a dial: a name (:market, :platform, ...) and an
+  # One dimension of a dial: a name (:market, :platform, ...) and an
   # optional set of allowed values — `enum`, the same word JSON Schema and
   # the dial value constraints use. The enum may be given as an Array or as a
   # callable (for values that are expensive to build or defined elsewhere,

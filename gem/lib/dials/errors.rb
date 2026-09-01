@@ -12,7 +12,7 @@ module Dials
   # ambiguous.
   class DuplicateDial < Error; end
 
-  # Raised when a definition itself is malformed (bad type, bad variants
+  # Raised when a definition itself is malformed (bad type, bad dimensions
   # shape, unknown schema keyword, default that fails its own schema).
   # Definitions fail at boot, not at first read in production.
   class InvalidDefinition < Error; end
@@ -22,10 +22,10 @@ module Dials
   # override).
   class InvalidValue < Error; end
 
-  # Raised when a scope does not match the dial's declared variant
-  # dimensions: unknown dimension, missing dimension, or a value outside a
-  # dimension's declared options. Also raised when a scope is given for a
-  # dial that declares no variants at all.
+  # Raised when a scope does not match the dial's declared dimensions:
+  # unknown dimension, missing dimension, or a value outside a dimension's
+  # declared enum. Also raised when a scope is given for a dial that
+  # declares no dimensions at all.
   class InvalidScope < Error; end
 
   # Raised when a write arrives without an actor. Every write is attributed;

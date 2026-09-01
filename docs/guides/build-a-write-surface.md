@@ -38,8 +38,8 @@ def index
         global_override: state.global_override?,
         global_value: state.global_value,
         global_version: state.global_version,   # stale-write token for the global
-        variations: state.variations.map { |scope, value|
-          { scope: scope, value: value, version: state.variation_versions[scope] }
+        scoped_overrides: state.scoped_overrides.map { |scope, value|
+          { scope: scope, value: value, version: state.scoped_override_versions[scope] }
         }
       }
     }
@@ -54,10 +54,10 @@ client-side (`schema` is a real JSON Schema fragment — feed it to any
 validator; the server re-checks; render `enum` values as selects), which
 cells are **inherited versus overridden** (`global_override` is an explicit
 boolean — a kill switch overridden to `false` must never render as "no
-override"), and which scopes have variations. There is no "dial CRUD" —
+override"), and which scopes hold overrides. There is no "dial CRUD" —
 dials are created in code, so the surface only edits *values*. For the
 resolved value in one specific context, `Dials.get(key, **scope)`;
-for one dial's stored variations, `Dials.variations(key)`.
+for one dial's stored scoped overrides, `Dials.scoped_overrides(key)`.
 
 ## Writes: pass the authenticated admin as actor
 

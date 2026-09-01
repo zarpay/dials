@@ -1,24 +1,24 @@
-# Variants and Scopes
+# Dimensions and Scopes
 
 ## Dimensions belong to the dial
 
 Different dials vary along different axes. Bazario's fee varies by market;
 its delivery threshold varies by market **and** platform; its banner copy
-varies by locale; its kill switch must never vary at all. So variant
-dimensions are declared per dial:
+varies by locale; its kill switch must never vary at all. So dimensions
+are declared per dial:
 
 ```ruby
 dial :checkout_fee_bps, default: 250, type: :integer,
-     variants: { market: { enum: %w[KE NG BD] } }
+     dimensions: { market: { enum: %w[KE NG BD] } }
 
 dial :free_delivery_threshold, default: 5_000, type: :integer,
-     variants: { market: { enum: %w[KE NG BD] },
+     dimensions: { market: { enum: %w[KE NG BD] },
                  platform: { enum: %w[ios android web] } }
 
 dial :welcome_banner, default: { "headline" => "Welcome" }, type: :json,
-     variants: { locale: {} }        # open dimension: any non-empty string
+     dimensions: { locale: {} }        # open dimension: any non-empty string
 
-dial :signups_enabled, default: true, type: :boolean   # no variants: global-only
+dial :signups_enabled, default: true, type: :boolean   # no dimensions: global-only
 ```
 
 A dimension with `enum:` validates every scope value against the list
@@ -31,12 +31,12 @@ One name is reserved: a dimension cannot be called `actor`. On the generated
 `adjust_`/`clear_` methods scope travels as bare keywords next to `actor:`,
 which must always mean attribution.
 
-## Declaring variants IS the arming gate
+## Declaring dimensions IS the arming gate
 
-A dial with no `variants:` cannot hold a variation — the write is rejected,
-not ignored. This is a process invariant disguised as an API:
+A dial with no `dimensions:` cannot hold a scoped override — the write is
+rejected, not ignored. This is a process invariant disguised as an API:
 
-> Add the `variants:` declaration in the same PR as the code that reads the
+> Add the `dimensions:` declaration in the same PR as the code that reads the
 > varied value.
 
 Without the gate, an operator can create a "BD = 24" row that nothing
@@ -49,7 +49,7 @@ dials in a registry-integrity spec
 so arming one more dial fails a test until the pin is deliberately updated.
 
 The same logic gives you global-only dials for free: a kill switch declared
-without `variants:` *cannot* be half-off in one market, even by a determined
+without `dimensions:` *cannot* be half-off in one market, even by a determined
 operator with production console access to the API.
 
 ## The exact-scope rule (v1)
@@ -63,7 +63,7 @@ Dials.use_free_delivery_threshold                                  # InvalidScop
 Dials.use_signups_enabled(market: "KE")                            # InvalidScope
 ```
 
-One sentence to remember: **a variation matches exactly, or you get the
+One sentence to remember: **a scoped override matches exactly, or you get the
 global.** No precedence table, no "which partial wins" question, nothing to
 misremember at 2am.
 

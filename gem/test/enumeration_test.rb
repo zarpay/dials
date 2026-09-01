@@ -10,27 +10,27 @@ class EnumerationTest < Minitest::Test
     define_standard_dials
   end
 
-  # -- Dials.variations -------------------------------------------------------
+  # -- Dials.scoped_overrides -------------------------------------------------------
 
-  def test_variations_returns_parsed_scopes_never_canonical_strings
+  def test_scoped_overrides_returns_parsed_scopes_never_canonical_strings
     Dials.adjust_merchant_fee_bps(120, actor: ACTOR, market: "BD")
     Dials.adjust_merchant_fee_bps(150, actor: ACTOR, market: "NG")
 
-    assert_equal({ { market: "BD" } => 120, { market: "NG" } => 150 }, Dials.variations(:merchant_fee_bps))
+    assert_equal({ { market: "BD" } => 120, { market: "NG" } => 150 }, Dials.scoped_overrides(:merchant_fee_bps))
   end
 
-  def test_variations_is_empty_for_no_stored_variations_and_for_global_only_dials
-    assert_equal({}, Dials.variations(:merchant_fee_bps))
-    assert_equal({}, Dials.variations(:signups_enabled))
+  def test_scoped_overrides_is_empty_when_nothing_scoped_is_stored
+    assert_equal({}, Dials.scoped_overrides(:merchant_fee_bps))
+    assert_equal({}, Dials.scoped_overrides(:signups_enabled))
   end
 
-  def test_variations_raises_for_unknown_keys
-    assert_raises(Dials::UnknownDial) { Dials.variations(:no_such_dial) }
+  def test_scoped_overrides_raises_for_unknown_keys
+    assert_raises(Dials::UnknownDial) { Dials.scoped_overrides(:no_such_dial) }
   end
 
-  def test_variations_result_is_deep_frozen
+  def test_scoped_overrides_result_is_deep_frozen
     Dials.adjust_merchant_fee_bps(120, actor: ACTOR, market: "BD")
-    result = Dials.variations(:merchant_fee_bps)
+    result = Dials.scoped_overrides(:merchant_fee_bps)
 
     assert result.frozen?
     assert result.keys.first.frozen?
@@ -57,11 +57,11 @@ class EnumerationTest < Minitest::Test
     assert_equal false, state.global_value
   end
 
-  def test_overview_carries_variations_and_json_schema
+  def test_overview_carries_scoped_overrides_and_json_schema
     Dials.adjust_merchant_fee_bps(120, actor: ACTOR, market: "BD")
 
     state = Dials.overview.dials.find { |d| d.key == :merchant_fee_bps }
-    assert_equal({ { market: "BD" } => 120 }, state.variations)
+    assert_equal({ { market: "BD" } => 120 }, state.scoped_overrides)
     assert_equal "integer", state.json_schema["type"]
     assert_equal 1, state.json_schema["minimum"]
     assert_equal state.definition, Dials.registry.fetch(:merchant_fee_bps)
@@ -84,12 +84,12 @@ class EnumerationTest < Minitest::Test
     state = Dials.overview.dials.find { |d| d.key == :merchant_fee_bps }
     assert_kind_of String, state.global_version
     refute_equal Dials::ABSENT_VERSION, state.global_version
-    assert_equal [{ market: "BD" }], state.variation_versions.keys
-    refute_equal state.global_version, state.variation_versions[{ market: "BD" }]
+    assert_equal [{ market: "BD" }], state.scoped_override_versions.keys
+    refute_equal state.global_version, state.scoped_override_versions[{ market: "BD" }]
 
     untouched = Dials.overview.dials.find { |d| d.key == :signups_enabled }
     assert_equal Dials::ABSENT_VERSION, untouched.global_version
-    assert_empty untouched.variation_versions
+    assert_empty untouched.scoped_override_versions
   end
 
   def test_overview_is_one_coherent_snapshot
@@ -100,7 +100,7 @@ class EnumerationTest < Minitest::Test
     # token still names the state it rendered.
     Dials.adjust_merchant_fee_bps(999, actor: ACTOR, market: "BD")
     state = overview.dials.find { |d| d.key == :merchant_fee_bps }
-    assert_equal 120, state.variations[{ market: "BD" }]
+    assert_equal 120, state.scoped_overrides[{ market: "BD" }]
     refute_equal Dials.overview.version, overview.version
   end
 

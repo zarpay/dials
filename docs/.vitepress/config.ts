@@ -3,7 +3,7 @@ import { defineConfig } from 'vitepress';
 export default defineConfig({
   base: '/dials/',
   title: 'dials',
-  description: 'Operator-adjustable values with per-variant overrides for Ruby and Rails',
+  description: 'Operator-adjustable values with per-scope overrides for Ruby and Rails',
   lang: 'en-US',
   cleanUrls: true,
   lastUpdated: true,
@@ -40,7 +40,7 @@ export default defineConfig({
         text: 'Concepts',
         items: [
           { text: 'The Dial Model', link: '/concepts/the-dial-model' },
-          { text: 'Variants and Scopes', link: '/concepts/variants-and-scopes' },
+          { text: 'Dimensions and Scopes', link: '/concepts/dimensions-and-scopes' },
           { text: 'Caching', link: '/concepts/caching' },
           { text: 'The Change Log', link: '/concepts/change-log' },
           { text: 'When NOT to Use a Dial', link: '/concepts/pattern-boundary' },

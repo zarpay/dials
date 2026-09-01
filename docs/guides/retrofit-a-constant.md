@@ -30,8 +30,8 @@ Dials.define do
 end
 ```
 
-No `variants:` yet — this dial is global-only until something reads a varied
-value ([the arming gate](/concepts/variants-and-scopes)).
+No `dimensions:` yet — this dial is global-only until something reads a varied
+value ([the arming gate](/concepts/dimensions-and-scopes)).
 
 Choose the constraints now, while you're thinking about it — `minimum:` and
 `maximum:` are the difference between "operator typo'd 25000" being a
@@ -62,7 +62,7 @@ When the BD market needs a different fee, one PR does both halves:
 # The arming diff — visible in review:
 dial :checkout_fee_bps, default: 250,
      type: :integer, minimum: 1, maximum: 10_000, unit: "bps",
-     variants: { market: { enum: %w[KE NG BD] } }
+     dimensions: { market: { enum: %w[KE NG BD] } }
 ```
 
 ```ruby

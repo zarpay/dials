@@ -57,16 +57,16 @@ RSpec.describe "Dial registry" do
     )
   end
 
-  it "pins which dials are armed for variation" do
-    armed = Dials.registry.select(&:variants?).to_h { |d| [d.key, d.dimension_names] }
+  it "pins which dials are armed, and along which dimensions" do
+    armed = Dials.registry.select(&:dimensions?).to_h { |d| [d.key, d.dimension_names] }
     expect(armed).to eq(checkout_fee_bps: [:market])
   end
 end
 ```
 
-Arming a dial (adding `variants:`) now fails a test until the pin is updated
+Arming a dial (adding `dimensions:`) now fails a test until the pin is updated
 in the same PR — which forces the [arming-gate
-discipline](/concepts/variants-and-scopes) through review.
+discipline](/concepts/dimensions-and-scopes) through review.
 
 ## Testing the gem's own behavior in your app
 

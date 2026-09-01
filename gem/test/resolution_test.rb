@@ -21,14 +21,14 @@ class ResolutionTest < Minitest::Test
     assert_equal 150, Dials.get(:merchant_fee_bps, market: "NG")
   end
 
-  def test_variation_beats_global_override
+  def test_scoped_override_beats_global_override
     Dials.set(:merchant_fee_bps, 150, actor: ACTOR)
     Dials.set(:merchant_fee_bps, 90, scope: { market: "KE" }, actor: ACTOR)
     assert_equal 90, Dials.get(:merchant_fee_bps, market: "KE")
     assert_equal 150, Dials.get(:merchant_fee_bps, market: "NG")
   end
 
-  def test_clearing_a_variation_falls_back_to_global
+  def test_clearing_a_scoped_override_falls_back_to_global
     Dials.set(:merchant_fee_bps, 150, actor: ACTOR)
     Dials.set(:merchant_fee_bps, 90, scope: { market: "KE" }, actor: ACTOR)
     assert Dials.clear(:merchant_fee_bps, scope: { market: "KE" }, actor: ACTOR)
@@ -41,7 +41,7 @@ class ResolutionTest < Minitest::Test
     assert_equal 100, Dials.get(:merchant_fee_bps, market: "KE")
   end
 
-  def test_variation_survives_a_cleared_global
+  def test_scoped_override_survives_a_cleared_global
     Dials.set(:merchant_fee_bps, 150, actor: ACTOR)
     Dials.set(:merchant_fee_bps, 90, scope: { market: "KE" }, actor: ACTOR)
     Dials.clear(:merchant_fee_bps, actor: ACTOR)
@@ -93,7 +93,7 @@ class ResolutionTest < Minitest::Test
     definition = Dials.registry.fetch(:free_delivery_threshold)
     snapshot = Dials::Snapshot.new(
       globals: { free_delivery_threshold: 60 },
-      variations: {
+      scoped_overrides: {
         free_delivery_threshold: {
           Dials::Scope.canonical({ market: "KE" }) => 40,
           Dials::Scope.canonical({ platform: "ios" }) => 30,
@@ -119,7 +119,7 @@ class ResolutionTest < Minitest::Test
     definition = Dials.registry.fetch(:free_delivery_threshold) # declares market, then platform
     snapshot = Dials::Snapshot.new(
       globals: {},
-      variations: {
+      scoped_overrides: {
         free_delivery_threshold: {
           Dials::Scope.canonical({ market: "KE" }) => 40,
           Dials::Scope.canonical({ platform: "ios" }) => 30

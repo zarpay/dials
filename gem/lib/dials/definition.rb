@@ -15,10 +15,11 @@ module Dials
   #          the escape hatch for rules a schema cannot express. Unlike the
   #          schema keywords it cannot be rendered or serialized; prefer the
   #          keywords whenever they can say it.
-  # variants:: the dial's variant dimensions. Declaring variants is the
-  #          arming gate: a dial with none is global-only by construction,
-  #          and adding the declaration belongs in the same change as the
-  #          code that reads the varied value.
+  # dimensions:: the axes the dial can vary along (per market, per
+  #          platform, ...). Declaring dimensions is the arming gate: a dial
+  #          with none is global-only by construction, and adding the
+  #          declaration belongs in the same change as the code that reads
+  #          the dimensioned value.
   class Definition
     TYPES = %i[boolean integer float string json].freeze
 
@@ -31,7 +32,7 @@ module Dials
     attr_reader :key, :default, :type, :label, :unit, :description, :dimensions, :schema
 
     def initialize(key, default:, type:, label: nil, unit: nil, description: nil,
-                   variants: nil, validate: nil, **constraints)
+                   dimensions: nil, validate: nil, **constraints)
       @key = key.to_sym
       @type = type.to_sym
       @label = label || @key.to_s.tr("_", " ").capitalize
@@ -43,7 +44,7 @@ module Dials
       raise InvalidDefinition, "#{@key}: unknown type #{@type.inspect} (use one of #{TYPES.join(', ')})" unless TYPES.include?(@type)
 
       @schema = Schema.new(@key, @type, constraints)
-      @dimensions = build_dimensions(variants)
+      @dimensions = build_dimensions(dimensions)
       @default = default
 
       # Validate BEFORE freezing: a default that fails validation (including
@@ -59,7 +60,7 @@ module Dials
       freeze
     end
 
-    def variants?
+    def dimensions?
       !dimensions.empty?
     end
 
@@ -112,15 +113,15 @@ module Dials
       end
     end
 
-    def build_dimensions(variants)
-      case variants
+    def build_dimensions(declared)
+      case declared
       when nil then [].freeze
       when Array
-        variants.map { |name| Dimension.new(name) }.freeze
+        declared.map { |name| Dimension.new(name) }.freeze
       when Hash
-        variants.map { |name, spec| Dimension.new(name, enum: dimension_enum(name, spec)) }.freeze
+        declared.map { |name, spec| Dimension.new(name, enum: dimension_enum(name, spec)) }.freeze
       else
-        raise InvalidDefinition, "#{key}: variants must be a Hash or Array, got #{variants.class}"
+        raise InvalidDefinition, "#{key}: dimensions must be a Hash or Array, got #{declared.class}"
       end
     end
 
@@ -151,7 +152,7 @@ module Dials
       end
 
       names = dimension_names
-      raise InvalidDefinition, "#{key}: duplicate variant dimension" unless names.uniq.length == names.length
+      raise InvalidDefinition, "#{key}: duplicate dimension" unless names.uniq.length == names.length
 
       # Generated adjust_/clear_ methods take scope as bare keywords next to
       # actor: and expected_version:, so dimensions by those names could

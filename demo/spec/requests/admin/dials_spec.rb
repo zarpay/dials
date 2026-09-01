@@ -33,9 +33,9 @@ RSpec.describe "Admin dials API", type: :request do
       expect(fee["schema"]).to include("type" => "integer", "minimum" => 1, "maximum" => 10_000)
       expect(fee["global_override"]).to be(false)
       expect(fee["global_version"]).to eq(body["absent_version"])
-      variation = fee["variations"].sole
-      expect(variation).to include("scope" => { "market" => "BD" }, "value" => 120)
-      expect(variation["version"]).to be_a(String)
+      scoped = fee["scoped_overrides"].sole
+      expect(scoped).to include("scope" => { "market" => "BD" }, "value" => 120)
+      expect(scoped["version"]).to be_a(String)
     end
   end
 
@@ -89,7 +89,7 @@ RSpec.describe "Admin dials API", type: :request do
       expect(Dials.get(:checkout_fee_bps, market: "KE")).to eq(300)
     end
 
-    it "sets a variation" do
+    it "sets a scoped override" do
       put_dial(:checkout_fee_bps, { value: 120, scope: { market: "BD" } })
       expect(Dials.get(:checkout_fee_bps, market: "BD")).to eq(120)
       expect(Dials.get(:checkout_fee_bps, market: "KE")).to eq(250)
@@ -124,7 +124,7 @@ RSpec.describe "Admin dials API", type: :request do
   end
 
   describe "DELETE /admin/dials/:key" do
-    it "clears a variation back to the global layer" do
+    it "clears a scoped override back to the global layer" do
       put_dial(:checkout_fee_bps, { value: 120, scope: { market: "BD" } })
       delete "/admin/dials/checkout_fee_bps", params: { scope: { market: "BD" } }.to_json, headers: headers
       expect(response).to have_http_status(:no_content)

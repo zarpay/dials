@@ -15,7 +15,7 @@ module Dials
 
     # One stored override — the `dials` table holds nothing else. A global
     # override is simply the override at the empty scope, stored under the
-    # canonical encoding "{}"; a variation is the override at a non-empty
+    # canonical encoding "{}"; a scoped override sits at a non-empty
     # canonical scope. `value` is NOT NULL: "no override" is "no row", at
     # every layer — no anchor rows, no NULL-vs-false ambiguity to guard.
     # Identity is the natural key (key, scope), unique. `version` is the

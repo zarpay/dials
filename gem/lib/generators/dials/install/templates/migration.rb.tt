@@ -4,7 +4,7 @@ class CreateDialsTables < ActiveRecord::Migration[<%= ActiveRecord::Migration.cu
   def change
     # Stored overrides — one row per override, nothing else. A global
     # override is the override at the empty scope (stored as the canonical
-    # "{}"); a variation is the override at a non-empty canonical scope
+    # "{}"); a scoped override sits at a non-empty canonical scope
     # ({"market":"KE"}). No row = no override, at every layer. `value` is
     # JSON-encoded text and NOT NULL; values are never queried in SQL —
     # reads go through the in-process cache — so portable text beats jsonb.

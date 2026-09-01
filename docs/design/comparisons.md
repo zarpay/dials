@@ -1,6 +1,6 @@
 # Compared to Alternatives
 
-Dials occupies a specific spot: **operator-owned runtime values with variant
+Dials occupies a specific spot: **operator-owned runtime values with per-scope
 dimensions**. Each neighbor below is excellent at its own spot, and the
 right answer is often "both, for different values".
 
@@ -12,7 +12,7 @@ YAML — with typed fields declared in code and a read-only web UI.
 
 - **Its problem**: *deploy/environment configuration* — values that differ by
   environment and change with deploys, unified behind one API.
-- **What it lacks for the dials problem**: variant dimensions (its only axis
+- **What it lacks for the dials problem**: dimensions (its only axis
   is the Rails environment), write attribution, validation with teeth, and a
   first-class override/clear model.
 - **What dials lacks for its problem**: ENV and YAML layers, deliberately —
@@ -31,9 +31,9 @@ and a polling cache (its design validated ours). Differences that matter:
 - **Registry**: super_settings' settings are *created at runtime* in the UI;
   dials must be *declared in code* — key, type, constraints, dimensions — so
   review owns the shape and the value can't outlive its reader.
-- **Variants**: super_settings has one value per key; per-market values
+- **Dimensions**: super_settings has one value per key; per-market values
   land you back in key-naming conventions (`fee_bps_ke`, `fee_bps_ng`) with
-  no fallback semantics. Variants are dials' reason to exist.
+  no fallback semantics. Per-scope overrides are dials' reason to exist.
 - **Defaults**: super_settings defaults live at the call site
   (`Setting.fetch(key, default)`), dials' at the declaration — one place,
   reviewed, validated at boot.
@@ -43,7 +43,7 @@ and a polling cache (its design validated ours). Differences that matter:
 [Flipper](https://github.com/flippercloud/flipper) answers "**who** gets
 this behavior?" — booleans with actors, groups, and percentage rollouts,
 built for gradual release and experimentation. Dials answers "**what is the
-value** here?" — typed quantities with variant fallback. The overlap is the
+value** here?" — typed quantities with per-scope fallback. The overlap is the
 plain boolean kill switch, which either tool handles; if you're already
 running Flipper, keep your flags there and bring dials in when the values
 stop being booleans. Percentage-of-actors on a dial is a non-goal.

@@ -3,7 +3,7 @@
 require "test_helper"
 
 # Compare-and-swap writes (expected_version:) against the memory store.
-# Tokens are PER OVERRIDE: the global's and each variation's version travel
+# Tokens are PER OVERRIDE: the global's and each scoped override's version travel
 # on Dials.overview's DialStates, and Dials::ABSENT_VERSION asserts "no
 # override was stored here when I looked". ActiveRecord-specific semantics
 # (transactionality, guarded statements, retry behavior) are covered in
@@ -44,7 +44,7 @@ class CasTest < Minitest::Test
 
     state = state_of(:merchant_fee_bps)
     Dials.adjust_merchant_fee_bps(90, actor: ACTOR, market: "BD",
-                                  expected_version: state.variation_versions[{ market: "BD" }])
+                                  expected_version: state.scoped_override_versions[{ market: "BD" }])
     assert_equal 90, Dials.use_merchant_fee_bps(market: "BD")
 
     Dials.adjust_merchant_fee_bps(250, actor: ACTOR, expected_version: state.global_version)
@@ -139,7 +139,7 @@ class CasTest < Minitest::Test
 
   def test_expected_version_is_a_reserved_dimension_name
     error = assert_raises(Dials::InvalidDefinition) do
-      Dials.define { dial :fee, default: 1, type: :integer, variants: { expected_version: %w[a] } }
+      Dials.define { dial :fee, default: 1, type: :integer, dimensions: { expected_version: %w[a] } }
     end
     assert_match(/expected_version is a reserved dimension name/, error.message)
   end

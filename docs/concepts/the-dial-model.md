@@ -5,7 +5,7 @@
 Every read resolves through the same three layers, top down:
 
 ```
-1. variation        — a stored override for exactly this scope
+1. scoped override  — a stored override for exactly this scope
 2. global override  — a stored override for everywhere else
 3. code default     — the value declared in Dials.define (your initializer)
 ```
@@ -50,7 +50,7 @@ Every stored override is one row in one table, identified by its natural key:
 ```
 dials        (key, scope, value NOT NULL, version)   -- UNIQUE (key, scope)
              -- scope "{}"          = the global override (the empty scope)
-             -- scope {"market":..} = a variation
+             -- scope {"market":..} = a scoped override
              -- version             = per-override stale-write stamp
 dial_changes (append-only history; also the cache's version counter)
 ```
@@ -75,7 +75,7 @@ This shape has two structural payoffs:
   atomic against every concurrent write.
 
 An earlier iteration used two tables (a parent `dials` row per key, with
-variations hanging off a foreign key). Why it changed — and why the original
+scoped rows hanging off a foreign key). Why it changed — and why the original
 choice was right in the system this pattern came from — is recorded honestly
 in [Design Decisions](/design/decisions).
 

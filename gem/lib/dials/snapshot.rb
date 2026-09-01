@@ -5,7 +5,7 @@ module Dials
   #
   #   globals::    { key(Symbol) => value } — only dials with a stored global
   #                override appear; absence means "inherit the code default".
-  #   variations:: { key(Symbol) => { canonical_scope(String) => value } }
+  #   scoped_overrides:: { key(Symbol) => { canonical_scope(String) => value } }
   #   row_versions:: { key(Symbol) => { canonical_scope(String) => Integer } }
   #                — the per-override version stamps (the global's under
   #                Scope::GLOBAL), for stale-write tokens.
@@ -15,16 +15,16 @@ module Dials
   # snapshot, and a caller mutating a returned :json value must not be able
   # to corrupt what every other thread reads.
   class Snapshot
-    attr_reader :globals, :variations, :row_versions, :version
+    attr_reader :globals, :scoped_overrides, :row_versions, :version
 
-    def initialize(globals:, variations:, version:, row_versions: {})
+    def initialize(globals:, scoped_overrides:, version:, row_versions: {})
       @globals = Freeze.deep(globals)
-      @variations = Freeze.deep(variations)
+      @scoped_overrides = Freeze.deep(scoped_overrides)
       @row_versions = Freeze.deep(row_versions)
       @version = version
       freeze
     end
   end
 
-  Snapshot::EMPTY = Snapshot.new(globals: {}, variations: {}, version: 0)
+  Snapshot::EMPTY = Snapshot.new(globals: {}, scoped_overrides: {}, version: 0)
 end

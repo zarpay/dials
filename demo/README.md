@@ -10,12 +10,12 @@ part of the gem:
 
 | File | Teaches |
 |---|---|
-| `config/initializers/dials.rb` | The registry: every declaration shape (types, bounds, one/two/open variant dimensions, a global-only kill switch) |
+| `config/initializers/dials.rb` | The registry: every declaration shape (types, constraints, one/two/open dimensions, a global-only kill switch) |
 | `app/services/pricing/quote_service.rb` | The dial consumer: reads values for its context, never knows which layer they came from |
 | `app/services/onboarding/signup_policy.rb` | The global-only kill switch pattern |
 | `app/controllers/admin/dials_controller.rb` | The hand-built write surface (the gem ships no GUI): attribution, typed errors → HTTP statuses |
-| `spec/dials/registry_spec.rb` | The registry-integrity pin: arming a dial for variation is a visible, reviewed diff |
-| `spec/dials/resolution_spec.rb` | variation → global override → code default, layer by layer |
+| `spec/dials/registry_spec.rb` | The registry-integrity pin: arming a dial with dimensions is a visible, reviewed diff |
+| `spec/dials/resolution_spec.rb` | scoped override → global override → code default, layer by layer |
 | `spec/dials/change_log_spec.rb` | Attributed, append-only history |
 | `spec/dials/caching_spec.rb` | Own-writes-immediate, staleness probe, zero queries per read |
 | `spec/services/**` | Consuming and testing dials in domain code (`Dials::Testing.with_overrides`) |

@@ -22,13 +22,13 @@ require_relative "dials/stores/memory"
 require_relative "dials/config"
 require_relative "dials/testing"
 
-# Dials: operator-adjustable values with per-variant overrides.
+# Dials: operator-adjustable values with per-scope overrides.
 #
 # A dial is a value that starts life as a code default, can be overridden
-# globally at runtime, and can be overridden again per variant scope
-# (per market, per platform, ...). Resolution is always:
+# globally at runtime, and can be overridden again per scope along its
+# declared dimensions (per market, per platform, ...). Resolution is always:
 #
-#   variation → global override → code default
+#   scoped override → global override → code default
 #
 # Declarations live in code (Dials.define); values live in a store; reads
 # come from a per-process cache. Every write is attributed and logged.
@@ -67,7 +67,7 @@ module Dials
     #   Dials.define do
     #     dial :merchant_fee_bps, default: 100, type: :integer,
     #          minimum: 1, maximum: 10_000, unit: "bps",
-    #          variants: { market: { enum: %w[KE NG BD] } }
+    #          dimensions: { market: { enum: %w[KE NG BD] } }
     #     dial :signups_enabled, default: true, type: :boolean
     #   end
     #
@@ -129,21 +129,22 @@ module Dials
       Resolver.resolve(definition, normalized, current_snapshot)
     end
 
-    # One dial's stored variations as { parsed scope => value }, e.g.
-    # { { market: "BD" } => 24, { market: "NG" } => 48 }. Scopes come back as
-    # parsed hashes, never canonical scope strings. A dial with no stored
-    # variations (or no variants at all) returns {}. Reads from the same
-    # snapshot path as the generated readers, including the in-transaction
-    # rule. The result is deep-frozen — it shares structure with the
-    # process-wide snapshot.
-    def variations(key)
+    # One dial's stored scoped overrides as { parsed scope => value }, e.g.
+    # { { market: "BD" } => 24, { market: "NG" } => 48 } — "which markets
+    # override this dial?". Scopes come back as parsed hashes, never
+    # canonical scope strings. A dial with nothing scoped stored (or no
+    # dimensions at all) returns {}; the global override is not included
+    # (see overview). Reads from the same snapshot path as the generated
+    # readers, including the in-transaction rule. The result is deep-frozen —
+    # it shares structure with the process-wide snapshot.
+    def scoped_overrides(key)
       definition = registry.fetch(key)
-      parsed_variations(current_snapshot, definition.key)
+      parsed_scoped_overrides(current_snapshot, definition.key)
     end
 
     # Every registered dial's full state — definition (with its JSON Schema),
-    # global override (explicitly present-or-absent), variations, and the
-    # per-override stale-write tokens — read from ONE snapshot, so the
+    # global override (explicitly present-or-absent), scoped overrides, and
+    # the per-override stale-write tokens — read from ONE snapshot, so the
     # picture is coherent. Feed an override's token back as
     # `expected_version:` when writing it (Dials::ABSENT_VERSION for
     # overrides the page showed as not stored).
@@ -156,8 +157,8 @@ module Dials
           global_override: snapshot.globals.key?(definition.key),
           global_value: snapshot.globals[definition.key],
           global_version: StoreVersion.token(stamps[Scope::GLOBAL] || 0),
-          variations: parsed_variations(snapshot, definition.key),
-          variation_versions: parsed_versions(snapshot, definition.key)
+          scoped_overrides: parsed_scoped_overrides(snapshot, definition.key),
+          scoped_override_versions: parsed_versions(snapshot, definition.key)
         )
       end.freeze
       Overview.new(version: StoreVersion.token(snapshot.version), dials: dials)
@@ -173,12 +174,12 @@ module Dials
 
     # Store an override by key — the primitive under the generated
     # adjust_<key> methods. With no scope, overrides the global; with a
-    # scope, creates or updates the variation for exactly that scope. The
+    # scope, creates or updates the override for exactly that scope. The
     # value is validated against the dial's type and schema; `actor:` is
     # required and lands in the change log.
     #
     # `expected_version:` makes the write compare-and-swap against THIS
-    # override (the global when no scope keywords, the named variation
+    # override (the global when no scope keywords, the named scoped override
     # otherwise): pass the override's token from Dials.overview (or a
     # previous CAS write; Dials::ABSENT_VERSION when the page showed no
     # override) and the write is refused with StaleWrite — unapplied,
@@ -192,15 +193,13 @@ module Dials
 
       if scope.nil? || scope.empty?
         canonical = Scope::GLOBAL
-        store.set_global(definition.key, value, actor_attrs, expected_version: expected_version)
       else
-        raise InvalidScope, "dial #{definition.key} declares no variants" unless definition.variants?
+        raise InvalidScope, "dial #{definition.key} declares no dimensions" unless definition.dimensions?
 
         normalized = Scope.validate!(definition, scope, exact: true)
         canonical = Scope.canonical(normalized)
-        store.set_variation(definition.key, canonical, value, actor_attrs,
-                            expected_version: expected_version)
       end
+      store.set_override(definition.key, canonical, value, actor_attrs, expected_version: expected_version)
 
       after_write
       expected_version ? StoreVersion.token(store.override_version(definition.key, canonical)) : value
@@ -208,7 +207,7 @@ module Dials
 
     # Remove an override by key — the primitive under the generated
     # clear_<key> methods — returning resolution to the next layer down: a
-    # cleared variation inherits the global; a cleared global inherits the
+    # cleared scoped override inherits the global; a cleared global inherits the
     # code default. Returns true if an override existed. Clearing what is not
     # there is a no-op (and logs nothing).
     #
@@ -223,13 +222,12 @@ module Dials
 
       if scope.nil? || scope.empty?
         canonical = Scope::GLOBAL
-        removed = store.clear_global(definition.key, actor_attrs, expected_version: expected_version)
       else
         normalized = Scope.validate!(definition, scope, exact: true)
         canonical = Scope.canonical(normalized)
-        removed = store.clear_variation(definition.key, canonical, actor_attrs,
-                                        expected_version: expected_version)
       end
+      removed = store.clear_override(definition.key, canonical, actor_attrs,
+                                     expected_version: expected_version)
 
       after_write
       expected_version ? StoreVersion.token(store.override_version(definition.key, canonical)) : removed
@@ -240,12 +238,12 @@ module Dials
     # { canonical scope string => value } from the snapshot, re-keyed by
     # parsed scope hash. Values are already frozen snapshot references; the
     # freshly built hashes are frozen so no caller can mutate shared state.
-    def parsed_variations(snapshot, key)
-      stored = snapshot.variations[key] || {}
+    def parsed_scoped_overrides(snapshot, key)
+      stored = snapshot.scoped_overrides[key] || {}
       stored.to_h { |canonical, value| [Freeze.deep(Scope.parse(canonical)), value] }.freeze
     end
 
-    # { parsed scope hash => version token } for a dial's stored variations.
+    # { parsed scope hash => version token } for a dial's scoped overrides.
     def parsed_versions(snapshot, key)
       stamps = snapshot.row_versions[key] || {}
       stamps.except(Scope::GLOBAL)

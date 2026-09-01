@@ -7,14 +7,15 @@ module Dials
     # without a database, and it doubles as the executable specification of
     # the store interface:
     #
-    #   state                                  → { globals:, variations:, version:, row_versions: }
+    #   state                                  → { globals:, scoped_overrides:, version:, row_versions: }
     #   version                                → monotonic value, moves on every write
     #   override_version(key, canonical)       → the row's version stamp; 0 when absent
-    #   set_global(key, value, actor, expected_version: nil)          → previous value or nil
-    #   clear_global(key, actor, expected_version: nil)               → true if an override existed
-    #   set_variation(key, canonical, value, actor, expected_version: nil) → previous value or nil
-    #   clear_variation(key, canonical, actor, expected_version: nil) → true if a variation existed
+    #   set_override(key, canonical, value, actor, expected_version: nil) → previous value or nil
+    #   clear_override(key, canonical, actor, expected_version: nil)      → true if an override existed
     #   changes(key: nil, limit: 50)           → newest-first [ChangeRecord]
+    #
+    # `canonical` is always a canonical scope string; Scope::GLOBAL names the
+    # global override (the override at the empty scope).
     #
     # `actor` is the normalized hash from Dials::Actor. Value validation and
     # scope validation happen above the store; a store only persists.
@@ -39,7 +40,7 @@ module Dials
     class Memory
       def initialize
         @globals = {}
-        @variations = Hash.new { |h, k| h[k] = {} }
+        @scoped = Hash.new { |h, k| h[k] = {} }
         @row_versions = Hash.new { |h, k| h[k] = {} }
         @changes = []
         @version = 0
@@ -50,7 +51,7 @@ module Dials
         @mutex.synchronize do
           {
             globals: @globals.transform_values { |v| dup_value(v) },
-            variations: @variations.to_h { |k, scopes| [k, scopes.transform_values { |v| dup_value(v) }] },
+            scoped_overrides: @scoped.to_h { |k, scopes| [k, scopes.transform_values { |v| dup_value(v) }] },
             version: @version,
             row_versions: @row_versions.to_h { |k, scopes| [k, scopes.dup] }
           }
@@ -65,50 +66,39 @@ module Dials
         @mutex.synchronize { row_version(key, canonical_scope) }
       end
 
-      def set_global(key, value, actor, expected_version: nil)
-        @mutex.synchronize do
-          assert_version!(expected_version, row_version(key, Scope::GLOBAL))
-          stored = roundtrip(value)
-          old = @globals[key]
-          @globals[key] = stored
-          record(key, nil, "set", old, stored, actor)
-          stamp(key, Scope::GLOBAL)
-          old
-        end
-      end
-
-      def clear_global(key, actor, expected_version: nil)
-        @mutex.synchronize do
-          assert_version!(expected_version, row_version(key, Scope::GLOBAL))
-          next false unless @globals.key?(key)
-
-          old = @globals.delete(key)
-          record(key, nil, "clear", old, nil, actor)
-          unstamp(key, Scope::GLOBAL)
-          true
-        end
-      end
-
-      def set_variation(key, canonical_scope, value, actor, expected_version: nil)
+      def set_override(key, canonical_scope, value, actor, expected_version: nil)
         @mutex.synchronize do
           assert_version!(expected_version, row_version(key, canonical_scope))
           stored = roundtrip(value)
-          old = @variations[key][canonical_scope]
-          @variations[key][canonical_scope] = stored
-          record(key, canonical_scope, "set", old, stored, actor)
+          if canonical_scope == Scope::GLOBAL
+            old = @globals[key]
+            @globals[key] = stored
+            record(key, nil, "set", old, stored, actor)
+          else
+            old = @scoped[key][canonical_scope]
+            @scoped[key][canonical_scope] = stored
+            record(key, canonical_scope, "set", old, stored, actor)
+          end
           stamp(key, canonical_scope)
           old
         end
       end
 
-      def clear_variation(key, canonical_scope, actor, expected_version: nil)
+      def clear_override(key, canonical_scope, actor, expected_version: nil)
         @mutex.synchronize do
           assert_version!(expected_version, row_version(key, canonical_scope))
-          next false unless @variations.key?(key) && @variations[key].key?(canonical_scope)
+          if canonical_scope == Scope::GLOBAL
+            next false unless @globals.key?(key)
 
-          old = @variations[key].delete(canonical_scope)
-          @variations.delete(key) if @variations[key].empty?
-          record(key, canonical_scope, "clear", old, nil, actor)
+            old = @globals.delete(key)
+            record(key, nil, "clear", old, nil, actor)
+          else
+            next false unless @scoped.key?(key) && @scoped[key].key?(canonical_scope)
+
+            old = @scoped[key].delete(canonical_scope)
+            @scoped.delete(key) if @scoped[key].empty?
+            record(key, canonical_scope, "clear", old, nil, actor)
+          end
           unstamp(key, canonical_scope)
           true
         end

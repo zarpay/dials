@@ -8,9 +8,9 @@
 # markets (KE, NG, BD) across three platforms (ios, android, web). Its dials
 # exercise every declaration shape the gem supports:
 #
-#   checkout_fee_bps        integer, Range bounds, ONE variant dimension
-#   free_delivery_threshold integer, TWO variant dimensions (market × platform)
-#   signups_enabled         boolean kill switch, global-only (no variants:)
+#   checkout_fee_bps        integer, min/max, ONE dimension
+#   free_delivery_threshold integer, TWO dimensions (market × platform)
+#   signups_enabled         boolean kill switch, global-only (no dimensions:)
 #   support_email           string, global-only, callable bounds
 #   feature_copy            json, open "locale" dimension (no options list)
 #
@@ -18,8 +18,8 @@
 # only overrides: nothing below writes a row, and dropping every row returns
 # the app to exactly these defaults.
 #
-# A dial with no `variants:` is global-only by construction. Declaring
-# `variants:` is the arming gate — it ships in the same PR as the code that
+# A dial with no `dimensions:` is global-only by construction. Declaring
+# `dimensions:` is the arming gate — it ships in the same PR as the code that
 # reads the varied value (for this app, the services in app/services).
 
 require "dials/active_record"
@@ -42,7 +42,7 @@ Dials.define do
        maximum: 10_000,
        unit: "bps",
        description: "Fee charged on checkout, in basis points of the order total.",
-       variants: { market: { enum: markets } }
+       dimensions: { market: { enum: markets } }
 
   dial :free_delivery_threshold, default: 5_000,
        type: :integer,
@@ -50,7 +50,7 @@ Dials.define do
        maximum: 1_000_000,
        unit: "cents",
        description: "Order totals at or above this ship free.",
-       variants: { market: { enum: markets }, platform: { enum: platforms } }
+       dimensions: { market: { enum: markets }, platform: { enum: platforms } }
 
   dial :signups_enabled, default: true,
        type: :boolean,
@@ -69,5 +69,5 @@ Dials.define do
                      "cta" => { type: :string, min_length: 1 } },
        required: %w[headline cta],
        description: "Structured homepage banner copy.",
-       variants: { locale: {} } # open dimension: any non-empty locale string
+       dimensions: { locale: {} } # open dimension: any non-empty locale string
 end

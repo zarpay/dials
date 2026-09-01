@@ -93,14 +93,14 @@ class DefinitionTest < Minitest::Test
 
   def test_malformed_dimension_specs_raise_instead_of_becoming_open
     # String key: a typo must not silently mean "accepts anything".
-    assert_raises(Dials::InvalidDefinition) { build(variants: { market: { "enum" => %w[KE NG] } }) }
+    assert_raises(Dials::InvalidDefinition) { build(dimensions: { market: { "enum" => %w[KE NG] } }) }
     # Scalar spec: not a valid enum shape.
-    assert_raises(Dials::InvalidDefinition) { build(variants: { market: "KE" }) }
+    assert_raises(Dials::InvalidDefinition) { build(dimensions: { market: "KE" }) }
     # Unknown option keys.
-    assert_raises(Dials::InvalidDefinition) { build(variants: { market: { choices: %w[KE] } }) }
+    assert_raises(Dials::InvalidDefinition) { build(dimensions: { market: { choices: %w[KE] } }) }
     # Deliberately open stays expressible.
-    assert_nil build(variants: { market: {} }).dimensions.first.enum
-    assert_nil build(variants: { market: nil }).dimensions.first.enum
+    assert_nil build(dimensions: { market: {} }).dimensions.first.enum
+    assert_nil build(dimensions: { market: nil }).dimensions.first.enum
   end
 
   def test_callable_validate_escape_hatch
@@ -123,27 +123,27 @@ class DefinitionTest < Minitest::Test
     assert_equal "Merchant fee bps", build(:merchant_fee_bps).label
   end
 
-  def test_variants_hash_with_enum
-    definition = build(variants: { market: { enum: %w[KE NG] } })
-    assert definition.variants?
+  def test_dimensions_hash_with_enum
+    definition = build(dimensions: { market: { enum: %w[KE NG] } })
+    assert definition.dimensions?
     assert_equal [:market], definition.dimension_names
     assert_equal %w[KE NG], definition.dimensions.first.enum
   end
 
-  def test_variants_shorthand_array_of_names
-    definition = build(variants: %i[market platform])
+  def test_dimensions_shorthand_array_of_names
+    definition = build(dimensions: %i[market platform])
     assert_equal %i[market platform], definition.dimension_names
     assert_nil definition.dimensions.first.enum
   end
 
-  def test_variants_shorthand_enum_array
-    definition = build(variants: { market: %w[KE NG] })
+  def test_dimensions_shorthand_enum_array
+    definition = build(dimensions: { market: %w[KE NG] })
     assert_equal %w[KE NG], definition.dimensions.first.enum
   end
 
-  def test_variants_callable_enum_resolved_lazily
+  def test_dimensions_callable_enum_resolved_lazily
     calls = 0
-    definition = build(variants: { market: { enum: lambda {
+    definition = build(dimensions: { market: { enum: lambda {
       calls += 1
       %w[KE]
     } } })
@@ -155,7 +155,7 @@ class DefinitionTest < Minitest::Test
   end
 
   def test_duplicate_dimension_raises
-    assert_raises(Dials::InvalidDefinition) { build(variants: [:market, "market"]) }
+    assert_raises(Dials::InvalidDefinition) { build(dimensions: [:market, "market"]) }
   end
 
   def test_definitions_are_frozen

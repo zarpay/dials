@@ -35,12 +35,12 @@ changed this and what values are safe?"
 Dials is that whole arc, designed once:
 
 - **Declarations stay in code.** A dial's default, type, constraints, and
-  variant dimensions are Ruby, reviewed in PRs — the database stores only
+  dimensions are Ruby, reviewed in PRs — the database stores only
   overrides. Constraints speak JSON Schema (`minimum:`, `enum:`,
   `pattern:`, ...), so they're declarative data an admin surface can render.
-- **Resolution is one rule.** `variation → global override → code default`,
+- **Resolution is one rule.** `scoped override → global override → code default`,
   always. Delete every override and you are back to exactly what the code says.
-- **Variants are first-class.** `variants: { market: { enum: %w[KE NG BD] } }`
+- **Dimensions are first-class.** `dimensions: { market: { enum: %w[KE NG BD] } }`
   arms a dial for per-market values; the gem validates every scope against
   the declaration.
 - **Every write is attributed.** `Dials.adjust_checkout_fee_bps(..., actor:
@@ -57,7 +57,7 @@ Dials is that whole arc, designed once:
 Dials.define do
   dial :checkout_fee_bps, default: 250,
        type: :integer, minimum: 1, maximum: 10_000, unit: "bps",
-       variants: { market: { enum: %w[KE NG BD] } }
+       dimensions: { market: { enum: %w[KE NG BD] } }
 
   dial :signups_enabled, default: true, type: :boolean,
        description: "Global kill switch for signups."
@@ -71,7 +71,7 @@ Each declaration generates the dial's methods — read with `use_`, write with
 Dials.use_checkout_fee_bps(market: "KE")   # => 250   (code default)
 
 Dials.adjust_checkout_fee_bps(120, actor: current_admin, market: "BD")
-Dials.use_checkout_fee_bps(market: "BD")   # => 120   (variation)
+Dials.use_checkout_fee_bps(market: "BD")   # => 120   (scoped override)
 Dials.use_checkout_fee_bps(market: "KE")   # => 250   (still the default)
 
 Dials.clear_checkout_fee_bps(actor: current_admin, market: "BD")

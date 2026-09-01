@@ -1,6 +1,6 @@
 # dials
 
-Operator-adjustable values with per-variant overrides, attribution, and
+Operator-adjustable values with per-scope overrides, attribution, and
 caching.
 
 You wrote a constant. Then you needed to change it without a deploy, so you
@@ -12,7 +12,7 @@ that whole arc as one small library:
 Dials.define do
   dial :merchant_fee_bps, default: 100,
        type: :integer, minimum: 1, maximum: 10_000, unit: "bps",
-       variants: { market: { enum: %w[KE NG BD] } }
+       dimensions: { market: { enum: %w[KE NG BD] } }
 
   dial :signups_enabled, default: true, type: :boolean,
        description: "Global kill switch for new signups."
@@ -44,7 +44,7 @@ The key-taking primitives (`Dials.get`, `Dials.set`, `Dials.clear`) stay
 public underneath, for code that receives the key at runtime — an admin
 surface iterating the registry, a console one-liner.
 
-Resolution is always **variation → global override → code default**. The
+Resolution is always **scoped override → global override → code default**. The
 database stores only overrides; deleting them returns you to what the code
 says. Reads come from a per-process cache with a throttled staleness probe,
 so a dial read costs a hash lookup, not a query.
