@@ -22,7 +22,8 @@ with the dial in hand uses `Dials.use_checkout_fee_bps(...)` and friends.
 def index
   overview = Dials.overview
   render json: {
-    version: overview.version,   # echo back as expected_version on writes
+    version: overview.version,   # informational "rendered as of" stamp
+    absent_version: Dials::ABSENT_VERSION,
     dials: overview.dials.map { |state|
       definition = state.definition
       {
@@ -36,7 +37,10 @@ def index
         dimensions: definition.dimensions.map { |d| { name: d.name, enum: d.enum } },
         global_override: state.global_override?,
         global_value: state.global_value,
-        variations: state.variations.map { |scope, value| { scope: scope, value: value } }
+        global_version: state.global_version,   # stale-write token for the global
+        variations: state.variations.map { |scope, value|
+          { scope: scope, value: value, version: state.variation_versions[scope] }
+        }
       }
     }
   }
@@ -77,10 +81,12 @@ supplies it explicitly.
 
 ## Stale-write protection
 
-Echo the overview's `version` back as `expected_version` and no operator can
-ever overwrite a change they didn't see: the gem refuses the write with
-`Dials::StaleWrite` (atomically — nothing applied, nothing logged) when the
-store has moved since the page rendered. Map it to 409 and re-render:
+Echo each override's own version token back as `expected_version` when
+writing it (the payload's `absent_version` for cells rendered as inherited)
+and no operator can ever overwrite a change they didn't see: the gem refuses
+the write with `Dials::StaleWrite` (atomically — nothing applied, nothing
+logged) when that override has changed since the page rendered. Unrelated
+dials changing never conflict. Map it to 409 and re-render:
 
 ```ruby
 rescue_from Dials::StaleWrite do |error|
@@ -90,8 +96,8 @@ end
 
 On a 409 the client fetches a fresh overview, shows the operator what
 changed, and lets them decide again — never auto-retry, which would defeat
-the point. A successful CAS write returns the new version token, so
-sequential edits from one page can chain without a re-fetch.
+the point. A successful CAS write returns the override's new token, so
+sequential edits to the same override can chain without a re-fetch.
 
 ## Two hard-won details
 

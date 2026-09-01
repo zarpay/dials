@@ -196,31 +196,39 @@ the flag: declaring `variants:` is the gate, and the recommended
 registry-integrity spec makes arming a visible diff. Global-only dials fall
 out for free: no declaration, no variations, no flag.
 
-## Stale-write protection is a whole-store version CAS
+## Stale-write protection is per-override optimistic locking
 
-`expected_version:` compares against the **store's** version, not the dial's:
-a page renders at version V, every write echoes V, and any intervening write
-to any dial refuses it. That over-approximates conflicts (editing dial A is
-refused because unrelated dial B changed), and that's accepted deliberately:
-at operator scale the false-conflict rate is near zero, the mental model is
-one sentence ("the page you acted on is stale — re-read"), and the coherent
-`Dials.overview` snapshot already stamps exactly this token. Per-dial or
-per-row versioning is finer-grained and remains possible later without
-changing the token's opacity — callers never parse it.
+`expected_version:` compares against the version of the **override being
+written** — the global's, or the named variation's, with
+`Dials::ABSENT_VERSION` asserting "no override was stored here when I
+looked". Each row carries a version stamp (the id of the change-log entry
+that last wrote it — store-monotonic, so a row deleted and re-created can
+never revisit an old version), and mutations are the database's own atomic
+primitives: `UPDATE/DELETE ... WHERE version = <what I read>`, and the
+`UNIQUE(key, scope)` index as the guard for inserts. No lock table, no
+advisory locks — and the guarantee is *stronger* than a lock protocol,
+because an interleaving writer (conditional or not) changes the row and the
+guarded statement simply matches zero rows. Nothing has to opt in for CAS to
+hold.
 
-Two implementation commitments worth recording. First, **every** write —
-CAS or not — takes `SELECT ... FOR UPDATE` on the single `dial_locks` anchor
-row inside its transaction (portable where advisory locks are not; SQLite
-gets the same guarantee from its single-writer model). Serializing all
-writes is what makes the comparison atomic against every concurrent gem
-write, not just other CAS writes — the original CAS-writers-only locking had
-a hole an adversarial review caught: an unconditional write could commit
-inside a CAS writer's check-to-commit window. It also gives the change log's
-old/new values a true total order. Operators turn dials at human rates; the
-serialization costs nothing that matters. Second, `StaleWrite` is
-deliberately excluded from the store's transient-error retry loop, because a
-retried CAS would recompute against the new version and succeed, silently
-defeating the mechanism.
+This is the third shape this feature has had, and the path is worth
+recording. v1 compared a whole-store version and serialized only CAS writers
+on a lock-row anchor; an adversarial review (Codex) caught that unconditional
+writes could slip inside the check-to-commit window, so v2 made every write
+take the anchor lock. Then the "why does an insert need a lock at all?"
+question (Keith's) exposed the root: the lock existed only because the
+compare target was an *aggregate* (the change log's count + max id), which no
+conditional statement can guard. Moving the compare target into the row made
+the database's native primitives sufficient, deleted the `dial_locks` table,
+and eliminated the whole-store design's false conflicts (editing dial A can
+no longer be refused because unrelated dial B changed).
+
+Two commitments carried through every shape: `StaleWrite` is deliberately
+excluded from the store's retry loop (a retried CAS would recompute against
+the new version and succeed, silently defeating the mechanism), and a stale
+no-op clear still refuses — a page showing an override that no longer exists
+is stale. The change log's count+max(id) remains the **cache probe's** clock;
+it was only ever the wrong thing to CAS against.
 
 ## Validation happens at write time, not read time
 

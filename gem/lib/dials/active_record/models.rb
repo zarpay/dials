@@ -2,7 +2,7 @@
 
 module Dials
   module ActiveRecord
-    # The three gem-owned tables. Values are stored as JSON text (not jsonb)
+    # The two gem-owned tables. Values are stored as JSON text (not jsonb)
     # so the schema is portable across PostgreSQL, MySQL, and SQLite; nothing
     # ever queries inside a value or a scope — reads go through the
     # in-process cache, so the database is durable storage, not a query
@@ -18,7 +18,11 @@ module Dials
     # canonical encoding "{}"; a variation is the override at a non-empty
     # canonical scope. `value` is NOT NULL: "no override" is "no row", at
     # every layer — no anchor rows, no NULL-vs-false ambiguity to guard.
-    # Identity is the natural key (key, scope), unique.
+    # Identity is the natural key (key, scope), unique. `version` is the
+    # row's optimistic-concurrency stamp: the id of the change-log entry that
+    # last wrote it, compared-and-swapped by guarded UPDATE/DELETE
+    # statements (change ids are store-monotonic, so a row deleted and
+    # re-created can never revisit an old version).
     #
     # NOTE: uniqueness is textual, under the column's collation. Scope
     # strings are canonical (sorted keys, string values) so gem writes can
@@ -32,18 +36,6 @@ module Dials
       validates :key, :scope, presence: true
       validates :scope, uniqueness: { scope: :key }
       validates :value, presence: { message: "cannot be SQL NULL" }, unless: -> { value == "false" }
-    end
-
-    # A single-row anchor EVERY write locks (SELECT ... FOR UPDATE) inside
-    # its transaction. Serializing all gem writes across processes is what
-    # makes expected_version: compare-and-swap sound against every concurrent
-    # gem write (not just other CAS writes) and gives the change log a true
-    # total order; operator write rates make the serialization cost
-    # irrelevant. One row, no data — it exists to be locked.
-    class Lock < ::ActiveRecord::Base
-      self.table_name = "dial_locks"
-
-      ANCHOR_ID = 1
     end
 
     # Append-only attribution log; also the store's version counter (its max

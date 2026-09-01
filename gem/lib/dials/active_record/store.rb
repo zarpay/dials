@@ -2,51 +2,63 @@
 
 module Dials
   module Stores
-    # The production store: three ActiveRecord-backed tables — dials (one row
+    # The production store: two ActiveRecord-backed tables — dials (one row
     # per stored override; the global is the override at the empty scope,
-    # stored as Scope::GLOBAL), dial_changes (append-only log and version
-    # counter), and dial_locks (the single-row write-serialization anchor).
-    # Implements the same interface as Stores::Memory; every mutation runs in
-    # a transaction with its change-log row, so the version can never run
-    # ahead of or behind the data it stamps.
+    # stored as Scope::GLOBAL) and dial_changes (append-only log and version
+    # counter). Implements the same interface as Stores::Memory; every
+    # mutation runs in a transaction with its change-log row, so the version
+    # can never run ahead of or behind the data it stamps.
     #
-    # Every write takes SELECT ... FOR UPDATE on the anchor row first, fully
-    # serializing gem writes across processes. That is what makes
-    # expected_version: compare-and-swap sound against every concurrent gem
-    # write (not just other CAS writes) and gives the change log's old/new
-    # values a true total order. Operators turn dials at human rates; the
-    # serialization costs nothing that matters.
+    # Concurrency control is per-row optimistic locking, with no lock table
+    # and no advisory locks: every row carries a `version` stamp (the id of
+    # the change-log entry that last wrote it), and mutations are guarded
+    # statements — `UPDATE/DELETE ... WHERE version = <what I read>` — plus
+    # the UNIQUE(key, scope) index for inserts ("still absent" is the
+    # compare, the insert is the swap). The database's own row semantics make
+    # each write atomic against EVERY concurrent write, conditional or not:
+    # an interleaving writer changes the row version (or creates/deletes the
+    # row), the guarded statement matches zero rows, and the transaction —
+    # change-log row included — rolls back untouched.
     class ActiveRecordStore
       Override = Dials::ActiveRecord::Override
       Change = Dials::ActiveRecord::Change
-      Lock = Dials::ActiveRecord::Lock
 
       # Sentinel for "this row could not be decoded; skip it".
       SKIP = Object.new
 
       # Database races a write can lose and safely re-run once: two processes
-      # creating the anchor row (RecordNotUnique — also covers hypothetical
-      # override-insert races from writes made around the gem), and
-      # adapter-reported deadlocks / serialization failures
-      # (TransactionRollbackError covers both). StaleWrite is deliberately
-      # NOT here — a retried CAS would recompute against the new version and
-      # silently defeat the mechanism.
+      # inserting the same override (RecordNotUnique — the re-run sees the
+      # row and proceeds as an update or a StaleWrite), and adapter-reported
+      # deadlocks / serialization failures (TransactionRollbackError covers
+      # both). StaleWrite is deliberately NOT here — a retried CAS would
+      # recompute against the new version and silently defeat the mechanism.
       RETRYABLE = [
         ::ActiveRecord::RecordNotUnique,
         ::ActiveRecord::TransactionRollbackError
       ].freeze
 
+      # A guarded statement matched zero rows: an unconditional write lost a
+      # race and the whole transaction should re-run with fresh reads.
+      # Internal — surfaced as Dials::WriteConflict when retries run out.
+      class Conflict < StandardError
+      end
+
+      # Attempts per write: the first, plus retries for lost races. Operator
+      # write rates make even the second attempt rare.
+      WRITE_ATTEMPTS = 3
+
       def state
         # Version first: if a write lands between these reads, the snapshot
         # carries an older version than its data, and the next probe sees the
         # version move and rebuilds — stale in the safe direction only. The
-        # data itself is ONE query over one table, so a snapshot can no
-        # longer mix pre-write globals with post-write variations.
+        # data itself is ONE query over one table, so a snapshot can never
+        # mix pre-write globals with post-write variations.
         current_version = version
 
         globals = {}
         variations = {}
-        Override.pluck(:key, :scope, :value).each do |key, scope, raw|
+        row_versions = {}
+        Override.pluck(:key, :scope, :value, :version).each do |key, scope, raw, row_version|
           value = decode_row(raw, "dials(#{key}, #{scope})")
           next if value.equal?(SKIP)
 
@@ -54,10 +66,13 @@ module Dials
             globals[key.to_sym] = value
           elsif valid_scope_string?(key, scope)
             (variations[key.to_sym] ||= {})[scope] = value
+          else
+            next
           end
+          (row_versions[key.to_sym] ||= {})[scope] = row_version
         end
 
-        { globals: globals, variations: variations, version: current_version }
+        { globals: globals, variations: variations, version: current_version, row_versions: row_versions }
       end
 
       # The change log is append-only, so its row count moves on every
@@ -72,6 +87,13 @@ module Dials
       def version
         count, max = Change.pick(Arel.sql("COUNT(*)"), Arel.sql("COALESCE(MAX(id), 0)"))
         [count, max]
+      end
+
+      # A single override row's version stamp; 0 when no row exists (the
+      # StoreVersion::ABSENT state). The facade reads this after a CAS write
+      # to hand the caller the token for chaining.
+      def override_version(key, canonical_scope)
+        Override.where(key: key.to_s, scope: canonical_scope).pick(:version) || 0
       end
 
       # True when the current thread's connection is inside an open
@@ -99,19 +121,19 @@ module Dials
       end
 
       def set_global(key, value, actor, expected_version: nil)
-        write(expected_version) { set_override(key, Scope::GLOBAL, nil, value, actor) }
+        write { set_override(key, Scope::GLOBAL, nil, value, actor, expected_version) }
       end
 
       def clear_global(key, actor, expected_version: nil)
-        write(expected_version) { clear_override(key, Scope::GLOBAL, nil, actor) }
+        write { clear_override(key, Scope::GLOBAL, nil, actor, expected_version) }
       end
 
       def set_variation(key, canonical_scope, value, actor, expected_version: nil)
-        write(expected_version) { set_override(key, canonical_scope, canonical_scope, value, actor) }
+        write { set_override(key, canonical_scope, canonical_scope, value, actor, expected_version) }
       end
 
       def clear_variation(key, canonical_scope, actor, expected_version: nil)
-        write(expected_version) { clear_override(key, canonical_scope, canonical_scope, actor) }
+        write { clear_override(key, canonical_scope, canonical_scope, actor, expected_version) }
       end
 
       def changes(key: nil, limit: 50)
@@ -140,67 +162,58 @@ module Dials
 
       private
 
-      # Every mutation: one transaction, the anchor lock, the optional
-      # version comparison, then the block. Locking BEFORE comparing is what
-      # makes CAS atomic with the write: a concurrent writer (CAS or not)
-      # either committed before we took the lock — so the comparison sees its
-      # change — or blocks until we commit.
-      def write(expected_version)
-        transaction_with_retry do
-          lock_anchor!
-          assert_version!(expected_version)
-          yield
-        end
-      end
+      # One write: read the row, compare (when asked), append the change-log
+      # entry, then the guarded mutation — all in one transaction. The
+      # change-log row is created BEFORE the guarded statement so its id can
+      # stamp the row's new version; a guard that matches zero rows raises,
+      # rolling the log entry back with everything else.
+      def set_override(key, stored_scope, logged_scope, value, actor, expected)
+        row = Override.find_by(key: key.to_s, scope: stored_scope)
+        current = row&.version || 0
+        assert_version!(expected, current)
 
-      # The stored override's scope is always a canonical string (the global
-      # is Scope::GLOBAL); the change log's scope stays nil for globals
-      # (history's stable encoding), which is why both travel separately.
-      def set_override(key, stored_scope, logged_scope, value, actor)
-        override = Override.find_or_initialize_by(key: key.to_s, scope: stored_scope)
-        old = override.persisted? ? decode(override.value) : nil
-        override.update!(value: encode(value))
-        record(key, logged_scope, "set", old, value, actor)
+        old = row && decode(row.value)
+        change = record(key, logged_scope, "set", old, value, actor)
+
+        if row
+          updated = Override.where(id: row.id, version: current)
+                            .update_all(value: encode(value), version: change.id, updated_at: Time.now.utc)
+          raise(expected ? StaleWrite : Conflict, "override changed mid-write") if updated.zero?
+        else
+          # UNIQUE(key, scope) is the compare for inserts: a concurrent
+          # insert raises RecordNotUnique, and the re-run sees the row.
+          Override.create!(key: key.to_s, scope: stored_scope, value: encode(value), version: change.id)
+        end
+
         old
       end
 
       # Clearing removes the row — "no override" and "no row" are synonyms
-      # at every layer, with no anchor rows to garbage-collect. Clearing what
-      # is not there is a no-op and logs nothing (but the version comparison,
-      # if requested, already ran: a stale no-op is still stale).
-      # Named for the action, not the boolean (it mirrors the public clear,
-      # whose return is "did an override exist").
-      def clear_override(key, stored_scope, logged_scope, actor) # rubocop:disable Naming/PredicateMethod
-        override = Override.find_by(key: key.to_s, scope: stored_scope)
-        return false if override.nil?
+      # at every layer. Clearing what is not there is a no-op and logs
+      # nothing; with expected_version: it first proves the caller's picture
+      # (a page showing an override that no longer exists is stale).
+      # rubocop:disable-next Naming/PredicateMethod
+      def clear_override(key, stored_scope, logged_scope, actor, expected)
+        row = Override.find_by(key: key.to_s, scope: stored_scope)
+        current = row&.version || 0
+        assert_version!(expected, current)
 
-        old = decode(override.value)
-        override.destroy!
+        return false if row.nil?
+
+        old = decode(row.value)
         record(key, logged_scope, "clear", old, nil, actor)
+        deleted = Override.where(id: row.id, version: current).delete_all
+        raise(expected ? StaleWrite : Conflict, "override changed mid-write") if deleted.zero?
+
         true
       end
 
-      # The compare half of compare-and-swap. Runs after the anchor lock, so
-      # of two concurrent writes carrying the same expected version, exactly
-      # one commits; the other blocks on the lock, then re-reads a version
-      # that has moved, and raises StaleWrite — transaction rolled back,
-      # nothing applied, nothing logged.
-      def assert_version!(expected)
-        return if expected.nil?
-        return if expected == StoreVersion.token(version)
+      def assert_version!(expected, current)
+        return if expected.nil? || expected == StoreVersion.token(current)
 
         raise StaleWrite,
-              "the store has moved past version #{expected} — re-read (Dials.overview) and retry deliberately"
-      end
-
-      # SELECT ... FOR UPDATE on the anchor row the install migration seeds.
-      # Created on demand for databases migrated before the row existed; the
-      # create race (RecordNotUnique) is RETRYABLE, and the retry finds the
-      # row. SQLite ignores FOR UPDATE but serializes writers at the database
-      # level, which gives the same guarantee.
-      def lock_anchor!
-        Lock.lock.find_by(id: Dials::ActiveRecord::Lock::ANCHOR_ID) ||
-          Lock.create!(id: Dials::ActiveRecord::Lock::ANCHOR_ID)
+              "the override has changed since version #{expected} was read — " \
+              "re-read (Dials.overview) and retry deliberately"
       end
 
       def record(key, canonical_scope, action, old_value, new_value, actor)
@@ -216,18 +229,22 @@ module Dials
         )
       end
 
-      # One retry, and only when we are NOT inside an application
-      # transaction: after a failure there, the outer transaction is in an
-      # aborted state (PostgreSQL) and re-running statements would fail
-      # differently — the error must propagate to whoever owns that
-      # transaction.
-      def transaction_with_retry(&)
+      # Retries re-run the WHOLE transaction with fresh reads — but only when
+      # we are NOT inside an application transaction: after a database error
+      # there, the outer transaction is in an aborted state (PostgreSQL) and
+      # re-running statements would fail differently — the error must
+      # propagate to whoever owns that transaction. A Conflict that survives
+      # every attempt surfaces as WriteConflict (unconditional writes racing
+      # each other — essentially never at operator rates).
+      def write(&)
         attempts = 0
         begin
           Override.transaction(&)
-        rescue *RETRYABLE
+        rescue *RETRYABLE, Conflict => e
           attempts += 1
-          retry if attempts == 1 && !transaction_open?
+          retry if attempts < WRITE_ATTEMPTS && !transaction_open?
+          raise WriteConflict, "concurrent writes kept racing this override — safe to retry" if e.is_a?(Conflict)
+
           raise
         end
       end

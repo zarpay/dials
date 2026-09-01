@@ -123,14 +123,17 @@ stamped with a single version:
 
 ```ruby
 overview = Dials.overview
-overview.version                    # opaque token; echo back as expected_version:
+overview.version                    # store write-clock token (informational)
 overview.dials.each do |state|
   state.key                         # :checkout_fee_bps
   state.definition                  # the Definition
   state.json_schema                 # JSON Schema fragment for this dial
   state.global_override?            # explicitly present-or-absent...
   state.global_value                # ...because false ≠ "no override"
+  state.global_version              # the global's stale-write token
+                                    # (Dials::ABSENT_VERSION when not stored)
   state.variations                  # { parsed scope => value }
+  state.variation_versions          # { parsed scope => stale-write token }
 end
 ```
 
@@ -187,31 +190,35 @@ cache. Raises `Dials::InvalidValue`, `Dials::InvalidScope`,
 ### `expected_version:` — stale-write protection
 
 Every write path (generated and primitive) accepts `expected_version:`,
-which makes the write **compare-and-swap**: pass the token your page
-rendered at (from `Dials.overview`) and the write is refused with
-`Dials::StaleWrite` — unapplied, with nothing appended to the change log —
-if the store has moved since. The comparison is atomic with the write:
-every dial write (CAS or not) serializes on a single lock inside the
-store's transaction, so a CAS write cannot interleave with ANY concurrent
-gem write — of two writes carrying the same token, exactly one commits.
+which makes the write **compare-and-swap against the override it targets**
+(the global when there are no scope keywords, the named variation
+otherwise): pass that override's token from `Dials.overview` — or
+`Dials::ABSENT_VERSION` when the page showed no override stored — and the
+write is refused with `Dials::StaleWrite`, unapplied and with nothing
+appended to the change log, if the override has changed since. The
+comparison is atomic with the write via the database's own row primitives
+(guarded `UPDATE`/`DELETE`, the unique index for inserts): of two concurrent
+writes carrying the same token, exactly one commits, and an unconditional
+write interleaving has the same effect — nothing needs to opt in for the
+guarantee to hold. Writes to *other* overrides never conflict.
 
 ```ruby
-overview = Dials.overview
+state = Dials.overview.dials.find { |s| s.key == :checkout_fee_bps }
 # ... operator looks at the page, decides ...
 token = Dials.adjust_checkout_fee_bps(300, actor: admin,
-                                      expected_version: overview.version)
-# a CAS write returns the NEW token — chain it into the next write:
+                                      expected_version: state.global_version)
+# a CAS write returns the override's NEW token — chain the next write:
 Dials.clear_checkout_fee_bps(actor: admin, expected_version: token)
+# a CAS clear returns Dials::ABSENT_VERSION: the override is gone
 ```
 
-The token is opaque: obtain it from `overview` or a CAS write's return
-value and echo it back — never construct or parse one. Any successful write
-(CAS or not) moves the version. `expected_version` is a reserved dimension
-name, like `actor`. Passing nothing keeps today's unconditional
-last-write-wins, and unconditional writes keep their usual return values
-(the value for set, the boolean for clear). The staleness check runs even
-when a clear would be a no-op — a page showing an override that no longer
-exists is stale.
+Tokens are opaque: obtain them from `overview` or a CAS write's return value
+and echo them back — never construct or parse one (`Dials::ABSENT_VERSION`
+is the one well-known constant). `expected_version` is a reserved dimension
+name, like `actor`. Passing nothing keeps unconditional last-write-wins, and
+unconditional writes keep their usual return values (the value for set, the
+boolean for clear). The staleness check runs even when a clear would be a
+no-op — a page showing an override that no longer exists is stale.
 
 On `StaleWrite`, re-render from a fresh `Dials.overview` and let the
 operator decide again; retrying automatically would defeat the mechanism
@@ -280,9 +287,10 @@ log.
 
 A store is any object implementing the interface documented in
 [`Dials::Stores::Memory`](https://github.com/zarpay/dials/blob/main/gem/lib/dials/stores/memory.rb)
-(`state`, `version`, `set_global`, `clear_global`, `set_variation`,
-`clear_variation`, `changes`). Shipped: `Stores::Memory` (default) and
-`Stores::ActiveRecordStore` (via `require "dials/active_record"`).
+(`state`, `version`, `override_version`, `set_global`, `clear_global`,
+`set_variation`, `clear_variation`, `changes`). Shipped: `Stores::Memory`
+(default) and `Stores::ActiveRecordStore` (via
+`require "dials/active_record"`).
 
 ## Generator
 
@@ -304,4 +312,5 @@ All inherit `Dials::Error`:
 | `InvalidValue` | wrong type, schema violation, or nil on write/pin |
 | `InvalidScope` | wrong/missing/unknown dimensions or values |
 | `MissingActor` | write without `actor:` and no `config.default_actor` declared |
-| `StaleWrite` | `expected_version:` no longer matches the store — unapplied, unlogged |
+| `StaleWrite` | `expected_version:` no longer matches the targeted override — unapplied, unlogged |
+| `WriteConflict` | concurrent unconditional writes to one override outran the store's retries (effectively never) |

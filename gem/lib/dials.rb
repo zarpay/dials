@@ -52,6 +52,11 @@ module Dials
 
   CACHE_LOCK = Mutex.new
 
+  # The stale-write token of an override that is not stored. Pass it as
+  # `expected_version:` to assert "there was no override here when I looked"
+  # — the write succeeds only if that is still true.
+  ABSENT_VERSION = StoreVersion::ABSENT
+
   class << self
     # -- declaration ---------------------------------------------------------
 
@@ -137,18 +142,22 @@ module Dials
     end
 
     # Every registered dial's full state — definition (with its JSON Schema),
-    # global override (explicitly present-or-absent), and variations — read
-    # from ONE snapshot, so the picture is coherent and stamped with a single
-    # `version` token. Feed that token back as `expected_version:` on writes
-    # for stale-write protection.
+    # global override (explicitly present-or-absent), variations, and the
+    # per-override stale-write tokens — read from ONE snapshot, so the
+    # picture is coherent. Feed an override's token back as
+    # `expected_version:` when writing it (Dials::ABSENT_VERSION for
+    # overrides the page showed as not stored).
     def overview
       snapshot = current_snapshot
       dials = registry.map do |definition|
+        stamps = snapshot.row_versions[definition.key] || {}
         DialState.new(
           definition: definition,
           global_override: snapshot.globals.key?(definition.key),
           global_value: snapshot.globals[definition.key],
-          variations: parsed_variations(snapshot, definition.key)
+          global_version: StoreVersion.token(stamps[Scope::GLOBAL] || 0),
+          variations: parsed_variations(snapshot, definition.key),
+          variation_versions: parsed_versions(snapshot, definition.key)
         )
       end.freeze
       Overview.new(version: StoreVersion.token(snapshot.version), dials: dials)
@@ -168,28 +177,33 @@ module Dials
     # value is validated against the dial's type and schema; `actor:` is
     # required and lands in the change log.
     #
-    # `expected_version:` makes the write compare-and-swap: pass the token
-    # from Dials.overview (or a previous CAS write) and the write is refused
-    # with StaleWrite — unapplied, unlogged — if the store has moved since.
-    # A CAS write returns the NEW version token (chain it into the next
-    # write); an unconditional write returns the value, as always.
+    # `expected_version:` makes the write compare-and-swap against THIS
+    # override (the global when no scope keywords, the named variation
+    # otherwise): pass the override's token from Dials.overview (or a
+    # previous CAS write; Dials::ABSENT_VERSION when the page showed no
+    # override) and the write is refused with StaleWrite — unapplied,
+    # unlogged — if that override has changed since. A CAS write returns the
+    # override's NEW token (chain it into the next write); an unconditional
+    # write returns the value, as always.
     def set(key, value, actor:, scope: nil, expected_version: nil)
       definition = registry.fetch(key)
       actor_attrs = Actor.normalize(actor)
       definition.validate_value!(value)
 
       if scope.nil? || scope.empty?
+        canonical = Scope::GLOBAL
         store.set_global(definition.key, value, actor_attrs, expected_version: expected_version)
       else
         raise InvalidScope, "dial #{definition.key} declares no variants" unless definition.variants?
 
         normalized = Scope.validate!(definition, scope, exact: true)
-        store.set_variation(definition.key, Scope.canonical(normalized), value, actor_attrs,
+        canonical = Scope.canonical(normalized)
+        store.set_variation(definition.key, canonical, value, actor_attrs,
                             expected_version: expected_version)
       end
 
       after_write
-      expected_version ? StoreVersion.token(store.version) : value
+      expected_version ? StoreVersion.token(store.override_version(definition.key, canonical)) : value
     end
 
     # Remove an override by key — the primitive under the generated
@@ -200,23 +214,25 @@ module Dials
     #
     # `expected_version:` works exactly as on set — the staleness check runs
     # even when the clear would be a no-op (a page that shows an override
-    # which no longer exists IS stale), and a CAS clear returns the new
-    # version token instead of the boolean.
+    # which no longer exists IS stale), and a CAS clear returns the
+    # override's new token (Dials::ABSENT_VERSION, since it is now gone)
+    # instead of the boolean.
     def clear(key, actor:, scope: nil, expected_version: nil)
       definition = registry.fetch(key)
       actor_attrs = Actor.normalize(actor)
 
-      removed =
-        if scope.nil? || scope.empty?
-          store.clear_global(definition.key, actor_attrs, expected_version: expected_version)
-        else
-          normalized = Scope.validate!(definition, scope, exact: true)
-          store.clear_variation(definition.key, Scope.canonical(normalized), actor_attrs,
-                                expected_version: expected_version)
-        end
+      if scope.nil? || scope.empty?
+        canonical = Scope::GLOBAL
+        removed = store.clear_global(definition.key, actor_attrs, expected_version: expected_version)
+      else
+        normalized = Scope.validate!(definition, scope, exact: true)
+        canonical = Scope.canonical(normalized)
+        removed = store.clear_variation(definition.key, canonical, actor_attrs,
+                                        expected_version: expected_version)
+      end
 
       after_write
-      expected_version ? StoreVersion.token(store.version) : removed
+      expected_version ? StoreVersion.token(store.override_version(definition.key, canonical)) : removed
     end
 
     private
@@ -227,6 +243,13 @@ module Dials
     def parsed_variations(snapshot, key)
       stored = snapshot.variations[key] || {}
       stored.to_h { |canonical, value| [Freeze.deep(Scope.parse(canonical)), value] }.freeze
+    end
+
+    # { parsed scope hash => version token } for a dial's stored variations.
+    def parsed_versions(snapshot, key)
+      stamps = snapshot.row_versions[key] || {}
+      stamps.except(Scope::GLOBAL)
+            .to_h { |canonical, stamp| [Freeze.deep(Scope.parse(canonical)), StoreVersion.token(stamp)] }.freeze
     end
 
     def after_write

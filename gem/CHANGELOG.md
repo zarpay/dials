@@ -2,18 +2,31 @@
 
 ## [Unreleased]
 
-- **Breaking: one table of overrides; every write serializes on the anchor
-  lock.** The `dials` + `dial_variations` pair is replaced by a single
-  `dials` table — one row per stored override, keyed by `(key, scope)` with
-  the global stored as the canonical empty scope `"{}"` and `value` NOT NULL
-  (no anchor rows, no NULL-vs-false ambiguity, "no override" = "no row" at
-  every layer; internally the model is `Dials::ActiveRecord::Override`).
-  Additionally — closing a hole an adversarial design review caught — EVERY
-  write now takes the `dial_locks` row lock, not just CAS writes, which
-  makes `expected_version:` sound against all concurrent gem writes and
-  gives the change log a true total order. The change log keeps NULL scope
-  for global changes (history's stable encoding). Snapshot data now loads in
-  one query; the version's two aggregates come from one statement. Explicit
+- **Breaking: stale-write tokens are per-override; the `dial_locks` table is
+  gone.** `expected_version:` now compares against the override being
+  written (the global's token, a variation's token, or
+  `Dials::ABSENT_VERSION` for "no override was stored when I looked"),
+  carried on `Dials.overview`'s DialStates as `global_version` and
+  `variation_versions`. Each `dials` row carries a `version` stamp (the id
+  of the change-log entry that last wrote it — store-monotonic, so
+  delete-and-recreate can never revisit a version), and writes are the
+  database's own atomic primitives: guarded `UPDATE`/`DELETE ... WHERE
+  version = ?` plus the unique index for inserts. No lock table, no advisory
+  locks, and the guarantee holds against every concurrent write without
+  anyone opting in — while unrelated overrides can never false-conflict
+  (the whole-store design refused a write because ANY dial had changed). CAS
+  writes return the override's new token; a CAS clear returns
+  `Dials::ABSENT_VERSION`. New `Dials::WriteConflict` covers the
+  effectively-never case of unconditional writes outracing the store's
+  retries. `Overview#version` remains as the informational store clock.
+- **Breaking: one table of overrides.** The `dials` + `dial_variations` pair
+  is replaced by a single `dials` table — one row per stored override, keyed
+  by `(key, scope)` with the global stored as the canonical empty scope
+  `"{}"` and `value` NOT NULL (no anchor rows, no NULL-vs-false ambiguity,
+  "no override" = "no row" at every layer; internally the model is
+  `Dials::ActiveRecord::Override`). The change log keeps NULL scope for
+  global changes (history's stable encoding). Snapshot data now loads in one
+  query; the version's two aggregates come from one statement. Explicit
   column limits (key 100 chars — now validated at declaration — and scope
   255) keep the composite unique index inside every supported database's
   budget. Regenerate the install migration; there is no data migration
@@ -35,14 +48,14 @@
   generated readers (in-transaction rule included) and return frozen
   structures.
 - **Stale-write protection (compare-and-swap).** Every write path accepts
-  `expected_version:` — the token from `Dials.overview` (or a previous CAS
-  write's return value). A mismatch raises the new `Dials::StaleWrite` with
-  the write unapplied and nothing logged; the comparison is atomic with the
-  write (serialized across processes via the new single-row `dial_locks`
-  anchor table — the install migration creates and seeds it) and is
-  deliberately never auto-retried. CAS writes return the new version token;
-  unconditional writes keep their usual returns. `expected_version` joins
-  `actor` as a reserved dimension name.
+  `expected_version:` — an opaque token from `Dials.overview` (or a previous
+  CAS write's return value). A mismatch raises the new `Dials::StaleWrite`
+  with the write unapplied and nothing logged; the comparison is atomic with
+  the write and deliberately never auto-retried. CAS writes return the new
+  version token; unconditional writes keep their usual returns.
+  `expected_version` joins `actor` as a reserved dimension name. (The token
+  granularity and mechanism were refined in the same unreleased cycle — see
+  the per-override entry above.)
 - **Breaking: constraints now speak JSON Schema; `bounds:` is gone.**
   Declarations take the standard's keywords directly (snake_cased):
   `minimum:`/`maximum:`/`exclusive_minimum:`/`exclusive_maximum:`/

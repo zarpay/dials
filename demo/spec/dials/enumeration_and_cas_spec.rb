@@ -46,27 +46,37 @@ RSpec.describe "Dial enumeration and stale-write protection", type: :model do
   end
 
   describe "expected_version: (compare-and-swap)" do
-    it "chains tokens through sequential writes" do
-      token = Dials.overview.version
-      token = Dials.adjust_checkout_fee_bps(300, actor: actor, expected_version: token)
+    it "chains per-override tokens through sequential writes" do
+      token = Dials.adjust_checkout_fee_bps(300, actor: actor, expected_version: Dials::ABSENT_VERSION)
       token = Dials.adjust_checkout_fee_bps(310, actor: actor, expected_version: token)
-      Dials.clear_checkout_fee_bps(actor: actor, expected_version: token)
+      token = Dials.clear_checkout_fee_bps(actor: actor, expected_version: token)
 
+      expect(token).to eq(Dials::ABSENT_VERSION) # the override is gone again
       expect(Dials.use_checkout_fee_bps(market: "KE")).to eq(250)
       expect(Dials.changes.length).to eq(3)
     end
 
     it "refuses a stale write with nothing applied and nothing logged" do
-      version = Dials.overview.version
       Dials.adjust_checkout_fee_bps(300, actor: actor)
+      state = Dials.overview.dials.find { |d| d.key == :checkout_fee_bps }
+      Dials.adjust_checkout_fee_bps(310, actor: actor) # the override moves after the read
 
       expect do
-        Dials.adjust_checkout_fee_bps(999, actor: actor, expected_version: version)
+        Dials.adjust_checkout_fee_bps(999, actor: actor, expected_version: state.global_version)
       end.to raise_error(Dials::StaleWrite)
 
-      expect(Dials.use_checkout_fee_bps(market: "KE")).to eq(300)
-      expect(Dials.changes.length).to eq(1)
-      expect(Dials::ActiveRecord::Change.count).to eq(1)
+      expect(Dials.use_checkout_fee_bps(market: "KE")).to eq(310)
+      expect(Dials.changes.length).to eq(2)
+      expect(Dials::ActiveRecord::Change.count).to eq(2)
+    end
+
+    it "never conflicts on unrelated overrides" do
+      token = Dials.adjust_checkout_fee_bps(300, actor: actor, expected_version: Dials::ABSENT_VERSION)
+      Dials.adjust_signups_enabled(false, actor: actor)
+      Dials.adjust_checkout_fee_bps(120, actor: actor, market: "BD")
+
+      Dials.adjust_checkout_fee_bps(320, actor: actor, expected_version: token)
+      expect(Dials.use_checkout_fee_bps(market: "KE")).to eq(320)
     end
   end
 end

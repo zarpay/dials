@@ -7,8 +7,9 @@ module Dials
     # without a database, and it doubles as the executable specification of
     # the store interface:
     #
-    #   state                                  → { globals:, variations:, version: }
+    #   state                                  → { globals:, variations:, version:, row_versions: }
     #   version                                → monotonic value, moves on every write
+    #   override_version(key, canonical)       → the row's version stamp; 0 when absent
     #   set_global(key, value, actor, expected_version: nil)          → previous value or nil
     #   clear_global(key, actor, expected_version: nil)               → true if an override existed
     #   set_variation(key, canonical, value, actor, expected_version: nil) → previous value or nil
@@ -18,16 +19,20 @@ module Dials
     # `actor` is the normalized hash from Dials::Actor. Value validation and
     # scope validation happen above the store; a store only persists.
     #
-    # `expected_version:` (an opaque StoreVersion token) makes the write
-    # compare-and-swap: the comparison is atomic with the write — here,
-    # inside the same mutex hold — and a mismatch raises StaleWrite with
-    # nothing applied or logged. The check runs before the existence check
-    # on clears: a no-op clear against a stale picture is still stale.
+    # Concurrency control is per-override optimistic locking: every stored
+    # override carries a version stamp (here, the write counter at its last
+    # write; in the ActiveRecord store, the change-log id — both monotonic
+    # store-wide, so a row deleted and re-created never revisits a version).
+    # `expected_version:` (an opaque StoreVersion token) compares against
+    # THAT override's stamp — StoreVersion::ABSENT means "I saw no override
+    # here" — atomically with the write; a mismatch raises StaleWrite with
+    # nothing applied or logged. The check runs before the existence check on
+    # clears: a no-op clear against a stale picture is still stale.
     #
     # Values are round-tripped through JSON on write, exactly like the
     # ActiveRecord store. That buys two guarantees at once: the store never
     # retains a reference to a caller-owned mutable object (mutating a hash
-    # after Dials.set cannot silently change the stored override or rewrite
+    # after a write cannot silently change the stored override or rewrite
     # change-log history), and both stores return byte-identical shapes
     # (symbol keys become strings here too, so a test suite on the memory
     # store proves what production on ActiveRecord will do).
@@ -35,6 +40,7 @@ module Dials
       def initialize
         @globals = {}
         @variations = Hash.new { |h, k| h[k] = {} }
+        @row_versions = Hash.new { |h, k| h[k] = {} }
         @changes = []
         @version = 0
         @mutex = Mutex.new
@@ -45,7 +51,8 @@ module Dials
           {
             globals: @globals.transform_values { |v| dup_value(v) },
             variations: @variations.to_h { |k, scopes| [k, scopes.transform_values { |v| dup_value(v) }] },
-            version: @version
+            version: @version,
+            row_versions: @row_versions.to_h { |k, scopes| [k, scopes.dup] }
           }
         end
       end
@@ -54,47 +61,55 @@ module Dials
         @mutex.synchronize { @version }
       end
 
+      def override_version(key, canonical_scope)
+        @mutex.synchronize { row_version(key, canonical_scope) }
+      end
+
       def set_global(key, value, actor, expected_version: nil)
         @mutex.synchronize do
-          assert_version!(expected_version)
+          assert_version!(expected_version, row_version(key, Scope::GLOBAL))
           stored = roundtrip(value)
           old = @globals[key]
           @globals[key] = stored
           record(key, nil, "set", old, stored, actor)
+          stamp(key, Scope::GLOBAL)
           old
         end
       end
 
       def clear_global(key, actor, expected_version: nil)
         @mutex.synchronize do
-          assert_version!(expected_version)
+          assert_version!(expected_version, row_version(key, Scope::GLOBAL))
           next false unless @globals.key?(key)
 
           old = @globals.delete(key)
           record(key, nil, "clear", old, nil, actor)
+          unstamp(key, Scope::GLOBAL)
           true
         end
       end
 
       def set_variation(key, canonical_scope, value, actor, expected_version: nil)
         @mutex.synchronize do
-          assert_version!(expected_version)
+          assert_version!(expected_version, row_version(key, canonical_scope))
           stored = roundtrip(value)
           old = @variations[key][canonical_scope]
           @variations[key][canonical_scope] = stored
           record(key, canonical_scope, "set", old, stored, actor)
+          stamp(key, canonical_scope)
           old
         end
       end
 
       def clear_variation(key, canonical_scope, actor, expected_version: nil)
         @mutex.synchronize do
-          assert_version!(expected_version)
+          assert_version!(expected_version, row_version(key, canonical_scope))
           next false unless @variations.key?(key) && @variations[key].key?(canonical_scope)
 
           old = @variations[key].delete(canonical_scope)
           @variations.delete(key) if @variations[key].empty?
           record(key, canonical_scope, "clear", old, nil, actor)
+          unstamp(key, canonical_scope)
           true
         end
       end
@@ -108,14 +123,31 @@ module Dials
 
       private
 
+      # Callers hold the mutex.
+      def row_version(key, canonical_scope)
+        @row_versions[key][canonical_scope] || 0
+      end
+
       # Callers hold the mutex. Raises StaleWrite before anything is touched,
       # so the transactionless memory store still guarantees "unapplied and
       # unlogged" on a version mismatch.
-      def assert_version!(expected)
-        return if expected.nil? || expected == StoreVersion.token(@version)
+      def assert_version!(expected, current)
+        return if expected.nil? || expected == StoreVersion.token(current)
 
         raise StaleWrite,
-              "the store has moved past version #{expected} — re-read (Dials.overview) and retry deliberately"
+              "the override has changed since version #{expected} was read — " \
+              "re-read (Dials.overview) and retry deliberately"
+      end
+
+      # Callers hold the mutex; record has already bumped @version, which
+      # serves as the row stamp (the ActiveRecord analog is the change id).
+      def stamp(key, canonical_scope)
+        @row_versions[key][canonical_scope] = @version
+      end
+
+      def unstamp(key, canonical_scope)
+        @row_versions[key].delete(canonical_scope)
+        @row_versions.delete(key) if @row_versions[key].empty?
       end
 
       # Callers hold the mutex. Old/new values are duplicated (so a change

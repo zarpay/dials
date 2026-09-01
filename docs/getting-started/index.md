@@ -8,9 +8,9 @@ bin/rails generate dials:install
 bin/rails db:migrate
 ```
 
-The generator creates one migration (three tables: `dials` — one row per
-stored override, `dial_changes` — the attributed history, `dial_locks` — the
-write-serialization anchor) and `config/initializers/dials.rb`.
+The generator creates one migration (two tables: `dials` — one row per
+stored override, `dial_changes` — the attributed history) and
+`config/initializers/dials.rb`.
 
 ## Declare your first dials
 

@@ -2,12 +2,15 @@
 
 module Dials
   # The complete stored state of every registered dial, read from ONE
-  # snapshot in one call — so an admin page renders a coherent picture
-  # stamped with a single `version` token (feed it back as
-  # `expected_version:` on writes for stale-write protection).
+  # snapshot in one call — so an admin page renders a coherent picture.
   #
-  #   overview.version         # opaque store-version token (String)
+  #   overview.version         # the store's write-clock token (informational:
+  #                            # "rendered as of"; freshness displays, cheap
+  #                            # did-anything-change checks)
   #   overview.dials           # [DialState, ...] in registry order
+  #
+  # Stale-write tokens are PER OVERRIDE — see DialState#global_version and
+  # #variation_versions; feed those back as `expected_version:` on writes.
   Overview = Data.define(:version, :dials)
 
   # One dial's declaration plus its stored overrides at the snapshot moment.
@@ -15,7 +18,14 @@ module Dials
   # `global_override?` is explicit — a boolean dial overridden to `false`
   # must never be confusable with "no override" (`global_value` alone could
   # not distinguish them; it is nil when no global override exists).
-  DialState = Data.define(:definition, :global_override, :global_value, :variations) do
+  #
+  # `global_version` and `variation_versions` are the per-override
+  # stale-write tokens: echo the one for the override you are writing as
+  # `expected_version:`. A missing entry (or a global_version of
+  # Dials::ABSENT_VERSION) means "no override stored" — pass
+  # Dials::ABSENT_VERSION to assert it is still absent when you write.
+  DialState = Data.define(:definition, :global_override, :global_value, :global_version,
+                          :variations, :variation_versions) do
     def key
       definition.key
     end

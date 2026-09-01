@@ -32,12 +32,18 @@ module Dials
   # there is no anonymous mutation path through the public API.
   class MissingActor < Error; end
 
-  # Raised when a write carries `expected_version:` and the store has moved
-  # past that version — the caller acted on a stale picture. The write is
-  # not applied and nothing is appended to the change log. Deliberately NOT
-  # retried by the stores (a retried compare-and-swap would recompute
-  # against the new version and succeed, silently defeating the mechanism):
-  # the surface should re-render from Dials.overview and let the operator
-  # decide again.
+  # Raised when a write carries `expected_version:` and the override it
+  # targets has changed (or appeared, or vanished) since that version was
+  # read — the caller acted on a stale picture. The write is not applied and
+  # nothing is appended to the change log. Deliberately NOT retried by the
+  # stores (a retried compare-and-swap would recompute against the new
+  # version and succeed, silently defeating the mechanism): the surface
+  # should re-render from Dials.overview and let the operator decide again.
   class StaleWrite < Error; end
+
+  # Raised when concurrent UNCONDITIONAL writes to the same override race
+  # each other faster than the store's bounded retries can absorb —
+  # essentially never at operator write rates. Safe to retry; carries no
+  # staleness meaning (that is StaleWrite).
+  class WriteConflict < Error; end
 end

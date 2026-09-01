@@ -77,6 +77,21 @@ class EnumerationTest < Minitest::Test
     refute_equal before, after
   end
 
+  def test_overview_carries_per_override_versions
+    Dials.adjust_merchant_fee_bps(200, actor: ACTOR)
+    Dials.adjust_merchant_fee_bps(120, actor: ACTOR, market: "BD")
+
+    state = Dials.overview.dials.find { |d| d.key == :merchant_fee_bps }
+    assert_kind_of String, state.global_version
+    refute_equal Dials::ABSENT_VERSION, state.global_version
+    assert_equal [{ market: "BD" }], state.variation_versions.keys
+    refute_equal state.global_version, state.variation_versions[{ market: "BD" }]
+
+    untouched = Dials.overview.dials.find { |d| d.key == :signups_enabled }
+    assert_equal Dials::ABSENT_VERSION, untouched.global_version
+    assert_empty untouched.variation_versions
+  end
+
   def test_overview_is_one_coherent_snapshot
     Dials.adjust_merchant_fee_bps(120, actor: ACTOR, market: "BD")
     overview = Dials.overview

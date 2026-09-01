@@ -12,22 +12,18 @@ class CreateDialsTables < ActiveRecord::Migration[<%= ActiveRecord::Migration.cu
     # Explicit column limits keep the composite unique index inside every
     # supported database's index budget (MySQL utf8mb4 in particular):
     # (100 + 255) * 4 bytes ≈ 1.4KB, well under InnoDB's 3072-byte cap.
+    # `version` is the row's optimistic-concurrency stamp (the id of the
+    # change-log entry that last wrote it); writes are guarded statements
+    # (UPDATE/DELETE ... WHERE version = ?) plus the unique index for
+    # inserts — no lock table, no advisory locks.
     create_table :dials do |t|
       t.string :key, null: false, limit: 100
       t.string :scope, null: false, limit: 255
       t.text :value, null: false
+      t.bigint :version, null: false
       t.timestamps
     end
     add_index :dials, [:key, :scope], unique: true
-
-    # A single-row anchor every dial write locks (SELECT ... FOR UPDATE) to
-    # serialize writes across processes — this is what makes
-    # expected_version: compare-and-swap sound and the change log a true
-    # total order. One row, no data.
-    create_table :dial_locks
-    reversible do |dir|
-      dir.up { execute "INSERT INTO dial_locks (id) VALUES (1)" }
-    end
 
     # Append-only attribution log. Doubles as the cache's version counter
     # (max id moves on every write). No updated_at: rows are facts. scope is

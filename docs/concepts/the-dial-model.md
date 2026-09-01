@@ -48,11 +48,11 @@ the value?
 Every stored override is one row in one table, identified by its natural key:
 
 ```
-dials        (key, scope, value NOT NULL)   -- UNIQUE (key, scope)
+dials        (key, scope, value NOT NULL, version)   -- UNIQUE (key, scope)
              -- scope "{}"          = the global override (the empty scope)
              -- scope {"market":..} = a variation
-dial_changes (append-only history; also the version counter)
-dial_locks   (single row every write locks; serializes writes)
+             -- version             = per-override stale-write stamp
+dial_changes (append-only history; also the cache's version counter)
 ```
 
 A global override **is** an override at the empty scope — the resolution
@@ -67,12 +67,12 @@ This shape has two structural payoffs:
   NULL-anchor state, no parent-row lifecycle to bookkeep, and the
   false-vs-NULL kill-switch hazard is excluded by the schema itself, not
   just by validation.
-- **Writes serialize on one lock.** Every write takes `SELECT ... FOR
-  UPDATE` on the single `dial_locks` row inside its transaction, which makes
-  [stale-write protection](/reference/api#expected-version-stale-write-protection)
-  sound against every concurrent write and gives the change log a true total
-  order. Operators turn dials at human rates; the serialization costs
-  nothing that matters.
+- **Concurrency needs no lock table.** Every row carries a `version` stamp,
+  writes are guarded statements (`UPDATE/DELETE ... WHERE version = ?`), and
+  the unique index is the guard for inserts — the database's own row
+  semantics make each write, and
+  [stale-write protection](/reference/api#expected-version-stale-write-protection),
+  atomic against every concurrent write.
 
 An earlier iteration used two tables (a parent `dials` row per key, with
 variations hanging off a foreign key). Why it changed — and why the original

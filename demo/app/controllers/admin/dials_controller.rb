@@ -13,10 +13,12 @@ module Admin
   # Attribution: the authenticated admin is passed as actor: on every write.
   # Validation: the gem raises typed errors; they render as 422/404/409 here.
   #
-  # Stale-write protection: the index payload carries the `version` token the
-  # page rendered at; a client that echoes it back as `expected_version` can
-  # never overwrite a change it didn't see — the gem refuses with StaleWrite
-  # (409 here), and the client re-renders from a fresh GET.
+  # Stale-write protection: each override in the index payload carries its
+  # own version token (`global_version`, and `version` on every variation;
+  # `absent_version` is the token for overrides the page shows as not
+  # stored). A client that echoes the right token back as `expected_version`
+  # can never overwrite a change it didn't see — the gem refuses with
+  # StaleWrite (409 here), and the client re-renders from a fresh GET.
   #
   # This controller uses the key-taking primitives (Dials.get/set/clear and
   # Dials.overview) rather than the generated per-dial methods, because the
@@ -35,7 +37,8 @@ module Admin
     def index
       overview = Dials.overview
       render json: {
-        version: overview.version,
+        version: overview.version, # informational "rendered as of" stamp
+        absent_version: Dials::ABSENT_VERSION,
         dials: overview.dials.map { |state| present(state) }
       }
     end
@@ -78,8 +81,8 @@ module Admin
       params[:expected_version].presence
     end
 
-    # A CAS write returns the new version token — hand it to the client so
-    # sequential edits from one page can chain without a re-fetch.
+    # A CAS write returns the override's new token — hand it to the client
+    # so sequential edits to the same override can chain without a re-fetch.
     def write_response(result)
       if expected_version_param
         render json: { version: result }
@@ -109,7 +112,10 @@ module Admin
         dimensions: definition.dimensions.map { |d| { name: d.name, enum: d.enum } },
         global_override: state.global_override?,
         global_value: state.global_value,
-        variations: state.variations.map { |scope, value| { scope: scope, value: value } }
+        global_version: state.global_version,
+        variations: state.variations.map do |scope, value|
+          { scope: scope, value: value, version: state.variation_versions[scope] }
+        end
       }
     end
   end

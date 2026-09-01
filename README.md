@@ -8,7 +8,7 @@
 without a deploy. A dial is declared in code with a default, a type,
 JSON-Schema-style constraints, and optional variant dimensions (per market,
 per platform, ...); runtime
-overrides live in three small database tables, resolve
+overrides live in two small database tables, resolve
 **variation → global override → code default**, are served from a
 per-process cache, and every write is attributed in an append-only change
 log.

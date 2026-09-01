@@ -32,33 +32,53 @@ RSpec.describe "Admin dials API", type: :request do
       expect(fee["dimensions"]).to eq([{ "name" => "market", "enum" => %w[KE NG BD] }])
       expect(fee["schema"]).to include("type" => "integer", "minimum" => 1, "maximum" => 10_000)
       expect(fee["global_override"]).to be(false)
-      expect(fee["variations"]).to eq([{ "scope" => { "market" => "BD" }, "value" => 120 }])
+      expect(fee["global_version"]).to eq(body["absent_version"])
+      variation = fee["variations"].sole
+      expect(variation).to include("scope" => { "market" => "BD" }, "value" => 120)
+      expect(variation["version"]).to be_a(String)
     end
   end
 
   describe "stale-write protection (expected_version)" do
-    it "accepts a write at the rendered version and returns the new token" do
+    def rendered_fee_state
       get "/admin/dials", headers: headers
-      version = response.parsed_body["version"]
+      body = response.parsed_body
+      [body["dials"].find { |d| d["key"] == "checkout_fee_bps" }, body["absent_version"]]
+    end
+
+    it "accepts a write at the override's rendered version and returns its new token" do
+      fee, absent = rendered_fee_state
+      expect(fee["global_version"]).to eq(absent) # nothing stored yet
 
       put "/admin/dials/checkout_fee_bps",
-          params: { value: 300, expected_version: version }.to_json, headers: headers
+          params: { value: 300, expected_version: fee["global_version"] }.to_json, headers: headers
       expect(response).to have_http_status(:ok)
       expect(response.parsed_body["version"]).to be_a(String)
+      expect(response.parsed_body["version"]).not_to eq(absent)
       expect(Dials.get(:checkout_fee_bps, market: "KE")).to eq(300)
     end
 
-    it "refuses a write from a stale page with 409, changing nothing" do
-      get "/admin/dials", headers: headers
-      version = response.parsed_body["version"]
+    it "refuses a write against a stale override with 409, changing nothing" do
+      fee, = rendered_fee_state
 
       put_dial(:checkout_fee_bps, { value: 300 }) # another operator wins the race
 
       put "/admin/dials/checkout_fee_bps",
-          params: { value: 999, expected_version: version }.to_json, headers: headers
+          params: { value: 999, expected_version: fee["global_version"] }.to_json, headers: headers
       expect(response).to have_http_status(:conflict)
       expect(Dials.get(:checkout_fee_bps, market: "KE")).to eq(300)
       expect(Dials.changes.length).to eq(1)
+    end
+
+    it "does not conflict when an unrelated dial changed" do
+      fee, = rendered_fee_state
+
+      put_dial(:signups_enabled, { value: false }) # unrelated write
+
+      put "/admin/dials/checkout_fee_bps",
+          params: { value: 300, expected_version: fee["global_version"] }.to_json, headers: headers
+      expect(response).to have_http_status(:ok)
+      expect(Dials.get(:checkout_fee_bps, market: "KE")).to eq(300)
     end
   end
 
