@@ -28,10 +28,10 @@ the default used to be. Full argument in
 
 ## One table of overrides — a reversed decision, recorded honestly
 
-Storage is one table: every override is a row keyed by `(key, scope)`, where
-the global override is the override at the **empty scope**, stored as its
-canonical encoding `"{}"`. `value` is NOT NULL — "no override" is "no row",
-at every layer.
+Storage is one table, and (see the next section) it is append-only: every
+override is a stream of rows keyed by `(key, scope)`, where the global
+override is the stream at the **empty scope**, stored as its canonical
+encoding `"{}"`.
 
 An earlier iteration of this gem used two tables (a parent `dials` row per
 key, `dial_variations` hanging off a `NOT NULL` FK), inheriting the shape
@@ -59,8 +59,9 @@ code:
   lifecycle (create-on-first-variation, destroy-with-last-override, the
   `InvalidForeignKey` retry case) was pure bookkeeping cost.
 - **The nullable `dials.value` was the model's one standing subtlety.**
-  Unified, `value` is NOT NULL by schema, so NULL-vs-false can no longer be
-  confused anywhere — stronger than the validation-layer guard it replaces.
+  Unified, a "set" row always carries a value, so NULL-vs-false can no
+  longer be confused anywhere — a clear is an explicit event row, never an
+  ambiguous NULL state.
 - **The planned partial-scopes future lands on this shape.** Under
   "most-specific scope wins", the global is literally the empty partial
   scope; the unified table makes storage match the resolution model exactly.
@@ -72,15 +73,37 @@ options shouldn't differ only by case), and the composite index carries
 explicit column limits (key 100, scope 255) to stay inside every supported
 database's index budget.
 
-## The change log is a table the gem owns, and it is also the clock
+## The log is the state (and also the clock)
 
-Attribution ships in-gem (`dial_changes`) rather than as a PaperTrail
-integration: history of operator changes is the product here, not an audit
-add-on, and a hard dependency on a versioning gem would be the tail wagging
-the dog. The log doubles as the cache's version counter (max id), which
+The table is **append-only**: every write INSERTs one row, and the newest
+row per `(key, scope)` stream is the current override — action `set`
+carries a value, action `clear` ends the override. This came out of PR #1
+(Stephen's minimal-implementation exploration), adopted here with one
+addition that closes its race: `seq` numbers each stream's rows under
+`UNIQUE(key, scope, seq)`, so every writer claims the stream's next slot
+and of two concurrent claims the database rejects one. What the shape buys:
+
+- **History cannot disagree with state** — they are the same rows. An
+  override's previous value is literally its previous row, so
+  `Dials.changes` *derives* old values instead of trusting a second copy.
+- **Nothing mutates or deletes.** No upserts, no guarded UPDATE/DELETE, no
+  lifecycle bookkeeping; a clear appends its own attributed row.
+- **Point-in-time reconstruction is available** ("config as of last
+  Tuesday" = rows where created_at ≤ T, newest seq wins) — a capability the
+  mutable design couldn't offer cheaply.
+- The table grows only at human write rates — the same posture the change
+  log always had ("grows slowly forever; don't prune it").
+
+One advertised property changed shape: "no override = no row" became "no
+override = the stream's newest row is a clear (or the stream never
+existed)". Deliberate: the rows a clear leaves behind ARE the history.
+
+Attribution still ships in-gem rather than as a PaperTrail integration:
+history of operator changes is the product here, not an audit add-on. The
+same rows double as the cache's version counter (count + max id), which
 means the freshness mechanism watches *exactly* the writes the gem performs
-— an elegant fit that also defines the escape hatch's cost: writes bypassing
-the gem are invisible to the probe and need `Dials.reload!`.
+— and defines the escape hatch's cost: writes bypassing the gem are
+invisible to the probe and need `Dials.reload!`.
 
 ## Exact scopes now, partial scopes designed-for
 
@@ -107,20 +130,27 @@ column give exact uniqueness, portability, and zero-migration dimension
 growth. The same reasoning makes all value columns JSON *text* rather than
 jsonb.
 
-## Generated per-dial methods, with prefixes that carry the verb
+## Generated per-dial methods: a bare reader, verb-carrying writers
 
-The primary API is generated at declaration time: `Dials.use_base_fee(...)`,
-`Dials.adjust_base_fee(...)`, `Dials.clear_base_fee(...)`. An earlier
-iteration rejected generated methods because a bare `Dials.store_amount`
-reads like a write when it is a read — the method name carried the dial's
-noun but no verb. The `use_` / `adjust_` / `clear_` prefixes resolve that
-objection: every generated name states its direction, and a read can never
-be mistaken for a mutation.
+The primary API is generated at declaration time: `Dials.base_fee(...)` to
+read, `Dials.adjust_base_fee(...)` and `Dials.clear_base_fee(...)` to write.
+This naming took three tries, each recorded. First, generated methods were
+rejected outright because a bare `Dials.store_amount` reads like a write
+when it is a read. Second, uniform `use_`/`adjust_`/`clear_` prefixes
+resolved that by giving every name a verb. Third (adopted from PR #1's
+exploration), the reader dropped its prefix: reading is what you do with a
+dial all day and pays no prefix tax, while the writers keep their verbs — so
+a bare name is always a read and a mutation always announces itself. The
+original objection stays answered: nothing bare can write.
+
+The bare reader costs one thing: a dial cannot share a name with a facade
+method (`:store`, `:cache`, `:changes`, ...) — the boot-time collision check
+turns that into an `InvalidDefinition` error rather than silent shadowing.
 
 Three properties keep the dynamic layer honest:
 
 - The methods are **defined at declaration time**, never `method_missing` —
-  `respond_to?`, tab completion, and a grep for `use_base_fee` all work, and
+  `respond_to?`, tab completion, and a grep for `base_fee` all work, and
   a name collision raises `InvalidDefinition` at boot.
 - The key-taking primitives (`Dials.get` / `set` / `clear`) **stay public**
   as the dynamic-access layer, because a write surface receives the key as a
@@ -156,6 +186,12 @@ silent-nothing this gem's boot checks exist to prevent), and declaring
 `validate:` callable remains as the explicitly non-serializable escape hatch,
 and dimension `options:` became `enum:` so the whole declaration speaks one
 vocabulary.
+
+PR #1 later proposed replacing this vocabulary (and the `validate:` escape
+hatch) with case-equality objects and a hard dependency on the Literal gem.
+Declined: constraints-as-data is the point — a standard, serializable
+vocabulary that admin surfaces and agents can read — and the core stays
+zero-dependency.
 
 ## One vocabulary: dimensions and overrides
 
@@ -219,27 +255,29 @@ out for free: no declaration, no scoped overrides, no flag.
 `expected_version:` compares against the version of the **override being
 written** — the global's, or the named scoped override's, with
 `Dials::ABSENT_VERSION` asserting "no override was stored here when I
-looked". Each row carries a version stamp (the id of the change-log entry
-that last wrote it — store-monotonic, so a row deleted and re-created can
-never revisit an old version), and mutations are the database's own atomic
-primitives: `UPDATE/DELETE ... WHERE version = <what I read>`, and the
-`UNIQUE(key, scope)` index as the guard for inserts. No lock table, no
-advisory locks — and the guarantee is *stronger* than a lock protocol,
-because an interleaving writer (conditional or not) changes the row and the
-guarded statement simply matches zero rows. Nothing has to opt in for CAS to
-hold.
+looked". The token is the stream's live `seq`; rows are immutable and seq
+only grows, so a token can never be revisited (a cleared-and-recreated
+override continues its stream). Atomicity is the seq claim under
+`UNIQUE(key, scope, seq)`: an interleaving writer (conditional or not)
+takes the slot, the loser's INSERT is rejected by the database, and the
+re-run re-reads and raises StaleWrite. No lock table, no advisory locks, no
+guarded updates — and nothing has to opt in for CAS to hold.
 
-This is the third shape this feature has had, and the path is worth
+This is the fourth shape this feature has had, and the path is worth
 recording. v1 compared a whole-store version and serialized only CAS writers
 on a lock-row anchor; an adversarial review (Codex) caught that unconditional
 writes could slip inside the check-to-commit window, so v2 made every write
 take the anchor lock. Then the "why does an insert need a lock at all?"
 question (Keith's) exposed the root: the lock existed only because the
-compare target was an *aggregate* (the change log's count + max id), which no
-conditional statement can guard. Moving the compare target into the row made
-the database's native primitives sufficient, deleted the `dial_locks` table,
-and eliminated the whole-store design's false conflicts (editing dial A can
-no longer be refused because unrelated dial B changed).
+compare target was an *aggregate*, which no conditional statement can guard.
+v3 moved the compare target into the row (guarded UPDATE/DELETE), deleting
+the `dial_locks` table and the whole-store design's false conflicts. v4
+(with the append-only storage from PR #1) replaced the guarded statements
+with the seq claim — same guarantee, one mechanism for inserts, updates,
+and clears alike. PR #1 itself proposed shipping WITHOUT atomicity (an
+advisory check, honestly labeled); that was declined: its author's own
+analysis showed that adding atomicity back converges on this design, and a
+race that "basically never happens" is still a race.
 
 Two commitments carried through every shape: `StaleWrite` is deliberately
 excluded from the store's retry loop (a retried CAS would recompute against

@@ -38,7 +38,7 @@ A dial write in a migration is fine: it validates, attributes ("who" is the
 migration), and logs — the change log's first entry documents the handover.
 
 **Step 2 — repoint readers.** Replace every read of the legacy row with
-`Dials.use_graduation_window_hours`. Grep is your friend; the legacy key
+`Dials.graduation_window_hours`. Grep is your friend; the legacy key
 string is usually distinctive.
 
 **Step 3 — freeze, then drop.** Make the legacy row read-only in the old

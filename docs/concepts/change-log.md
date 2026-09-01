@@ -51,21 +51,25 @@ and with no `default_actor` configured, writes without `actor:` raise
 `MissingActor` exactly as before — the fallback is something an app
 declares in a reviewed initializer, never something the gem assumes.
 
-## The log is append-only
+## The log is append-only — and it is the state
 
-Every write lands one row in `dial_changes`:
+Every write lands exactly one row in the `dials` table, and that row IS the
+override (the newest row per (key, scope) is what resolution serves):
 
 | Column | Contents |
 |---|---|
 | `key` | which dial |
-| `scope` | canonical scope string, `NULL` for global changes |
+| `scope` | canonical scope string (`"{}"` for the global override) |
+| `seq` | the write's position in its (key, scope) stream — `UNIQUE(key, scope, seq)` |
 | `action` | `set` or `clear` |
-| `old_value` / `new_value` | JSON; `old_value NULL` when no override existed, `new_value NULL` on clear |
+| `value` | JSON; `NULL` on clear rows |
 | `actor_type` / `actor_id` / `actor_label` | attribution |
 | `created_at` | when |
 
-There is no `updated_at` — rows are facts, never edited. No-op clears
-(clearing an override that does not exist) log nothing.
+There is no `updated_at` — rows are immutable facts. There is no stored
+old-value either: a change's old value is *derived* from the previous row in
+its stream, so history cannot disagree with what was actually replaced.
+No-op clears (clearing an override that is not live) append nothing.
 
 Read it back in store-independent form:
 
@@ -81,11 +85,12 @@ surface renders ("fee changed here" markers on a conversion graph).
 
 ## The log is also the clock
 
-The change log's max id is the store's version counter — the thing the
+The same rows are the store's version counter — the thing the
 [cache staleness probe](/concepts/caching) watches. That is a deliberate
-two-birds design: because every legitimate write appends here, "has anything
-changed?" is one indexed query, and writes that *bypass* the gem are exactly
-the writes the probe cannot see. Retention pruning of `dial_changes` would
-break both history and (if it removed the max row) the clock; don't prune it.
-At operator scale — humans turning knobs — it grows slowly forever, and
-that's fine.
+three-birds design: state, history, and clock are one table, so "has
+anything changed?" is one cheap query, history cannot disagree with what
+happened (an override's old value is literally its previous row), and
+writes that *bypass* the gem are exactly the writes the probe cannot see.
+Never prune or mutate the table — the rows are state AND history AND the
+clock. At operator scale — humans turning knobs — it grows slowly forever,
+and that's fine.

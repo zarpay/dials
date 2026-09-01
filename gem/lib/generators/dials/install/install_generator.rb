@@ -29,7 +29,7 @@ module Dials
 
             1. bin/rails db:migrate
             2. Declare your dials in config/initializers/dials.rb
-            3. Declaring dial :base_fee generates Dials.use_base_fee,
+            3. Declaring dial :base_fee generates Dials.base_fee,
                Dials.adjust_base_fee, and Dials.clear_base_fee
 
         TEXT

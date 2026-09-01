@@ -2,43 +2,33 @@
 
 class CreateDialsTables < ActiveRecord::Migration[<%= ActiveRecord::Migration.current_version %>]
   def change
-    # Stored overrides — one row per override, nothing else. A global
-    # override is the override at the empty scope (stored as the canonical
-    # "{}"); a scoped override sits at a non-empty canonical scope
-    # ({"market":"KE"}). No row = no override, at every layer. `value` is
-    # JSON-encoded text and NOT NULL; values are never queried in SQL —
-    # reads go through the in-process cache — so portable text beats jsonb.
+    # The gem's ONE table, append-only: every write INSERTs a row, and the
+    # newest row per (key, scope) stream is the current override — action
+    # "set" carries a value, action "clear" ends the override. The change
+    # log IS the state (history cannot disagree with it), the row count is
+    # the cache's version counter, and UNIQUE(key, scope, seq) makes writes
+    # atomic: every writer claims the stream's next seq, and of two
+    # concurrent claims the database rejects one — no lock table, no
+    # advisory locks, no race.
+    #
+    # A global override is the stream at the canonical empty scope "{}".
+    # `value` is JSON-encoded text, never queried in SQL — reads go through
+    # the in-process cache. No updated_at: rows are immutable facts.
     #
     # Explicit column limits keep the composite unique index inside every
-    # supported database's index budget (MySQL utf8mb4 in particular):
-    # (100 + 255) * 4 bytes ≈ 1.4KB, well under InnoDB's 3072-byte cap.
-    # `version` is the row's optimistic-concurrency stamp (the id of the
-    # change-log entry that last wrote it); writes are guarded statements
-    # (UPDATE/DELETE ... WHERE version = ?) plus the unique index for
-    # inserts — no lock table, no advisory locks.
+    # supported database's index budget (MySQL utf8mb4 in particular).
     create_table :dials do |t|
       t.string :key, null: false, limit: 100
       t.string :scope, null: false, limit: 255
-      t.text :value, null: false
-      t.bigint :version, null: false
-      t.timestamps
-    end
-    add_index :dials, [:key, :scope], unique: true
-
-    # Append-only attribution log. Doubles as the cache's version counter
-    # (max id moves on every write). No updated_at: rows are facts. scope is
-    # NULL for global changes (history's stable encoding).
-    create_table :dial_changes do |t|
-      t.string :key, null: false
-      t.string :scope
+      t.bigint :seq, null: false
       t.string :action, null: false
-      t.text :old_value
-      t.text :new_value
+      t.text :value
       t.string :actor_type
       t.string :actor_id
       t.string :actor_label
       t.datetime :created_at, null: false
     end
-    add_index :dial_changes, :key
+    add_index :dials, [:key, :scope, :seq], unique: true
+    add_index :dials, :key
   end
 end

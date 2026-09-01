@@ -23,7 +23,7 @@ class CasTest < Minitest::Test
   def test_write_against_an_absent_override_with_the_absent_token
     token = Dials.adjust_merchant_fee_bps(200, actor: ACTOR, expected_version: Dials::ABSENT_VERSION)
 
-    assert_equal 200, Dials.use_merchant_fee_bps(market: "KE")
+    assert_equal 200, Dials.merchant_fee_bps(market: "KE")
     assert_kind_of String, token
     refute_equal Dials::ABSENT_VERSION, token
     assert_equal state_of(:merchant_fee_bps).global_version, token
@@ -35,7 +35,7 @@ class CasTest < Minitest::Test
     token = Dials.clear_merchant_fee_bps(actor: ACTOR, expected_version: token)
 
     assert_equal Dials::ABSENT_VERSION, token, "a CAS clear returns the absent token — the row is gone"
-    assert_equal 100, Dials.use_merchant_fee_bps(market: "KE") # back to the default
+    assert_equal 100, Dials.merchant_fee_bps(market: "KE") # back to the default
   end
 
   def test_overview_carries_the_token_for_each_stored_override
@@ -45,10 +45,10 @@ class CasTest < Minitest::Test
     state = state_of(:merchant_fee_bps)
     Dials.adjust_merchant_fee_bps(90, actor: ACTOR, market: "BD",
                                   expected_version: state.scoped_override_versions[{ market: "BD" }])
-    assert_equal 90, Dials.use_merchant_fee_bps(market: "BD")
+    assert_equal 90, Dials.merchant_fee_bps(market: "BD")
 
     Dials.adjust_merchant_fee_bps(250, actor: ACTOR, expected_version: state.global_version)
-    assert_equal 250, Dials.use_merchant_fee_bps(market: "KE")
+    assert_equal 250, Dials.merchant_fee_bps(market: "KE")
   end
 
   def test_stale_write_raises_with_nothing_applied_and_nothing_logged
@@ -61,7 +61,7 @@ class CasTest < Minitest::Test
       Dials.adjust_merchant_fee_bps(999, actor: ACTOR, expected_version: token)
     end
 
-    assert_equal 200, Dials.use_merchant_fee_bps(market: "KE")
+    assert_equal 200, Dials.merchant_fee_bps(market: "KE")
     assert_equal changes_before, Dials.changes.length
   end
 
@@ -94,7 +94,7 @@ class CasTest < Minitest::Test
     Dials.adjust_free_delivery_threshold(9_000, actor: ACTOR)
 
     Dials.adjust_merchant_fee_bps(200, actor: ACTOR, expected_version: token)
-    assert_equal 200, Dials.use_merchant_fee_bps(market: "KE")
+    assert_equal 200, Dials.merchant_fee_bps(market: "KE")
   end
 
   def test_nil_expected_version_keeps_unconditional_last_write_wins
@@ -129,7 +129,7 @@ class CasTest < Minitest::Test
   def test_cas_works_through_the_primitives_too
     Dials.set(:merchant_fee_bps, 200, actor: ACTOR, expected_version: Dials::ABSENT_VERSION,
                                       scope: { market: "BD" })
-    assert_equal 200, Dials.use_merchant_fee_bps(market: "BD")
+    assert_equal 200, Dials.merchant_fee_bps(market: "BD")
 
     assert_raises(Dials::StaleWrite) do
       Dials.clear(:merchant_fee_bps, actor: ACTOR, scope: { market: "BD" },

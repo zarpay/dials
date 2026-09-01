@@ -28,14 +28,14 @@ fragment to admin UIs and client-side validators.
 Each declaration generates the dial's methods:
 
 ```ruby
-Dials.use_merchant_fee_bps(market: "KE")   # => 100 (the code default)
+Dials.merchant_fee_bps(market: "KE")   # => 100 (the code default)
 
 Dials.adjust_merchant_fee_bps(90, actor: current_admin, market: "KE")
-Dials.use_merchant_fee_bps(market: "KE")   # => 90
-Dials.use_merchant_fee_bps(market: "NG")   # => 100
+Dials.merchant_fee_bps(market: "KE")   # => 90
+Dials.merchant_fee_bps(market: "NG")   # => 100
 
 Dials.clear_merchant_fee_bps(actor: current_admin, market: "KE")
-Dials.use_merchant_fee_bps(market: "KE")   # => 100 again
+Dials.merchant_fee_bps(market: "KE")   # => 100 again
 
 Dials.changes(key: :merchant_fee_bps)      # attributed, append-only history
 ```
@@ -44,10 +44,12 @@ The key-taking primitives (`Dials.get`, `Dials.set`, `Dials.clear`) stay
 public underneath, for code that receives the key at runtime — an admin
 surface iterating the registry, a console one-liner.
 
-Resolution is always **scoped override → global override → code default**. The
-database stores only overrides; deleting them returns you to what the code
-says. Reads come from a per-process cache with a throttled staleness probe,
-so a dial read costs a hash lookup, not a query.
+Resolution is always **scoped override → global override → code default**.
+The database is one append-only table storing only overrides — state,
+attributed history, and the cache's version counter are the same rows, and
+clearing every override returns you to exactly what the code says. Reads
+come from a per-process cache with a throttled staleness probe, so a dial
+read costs a hash lookup, not a query.
 
 ## Installation
 

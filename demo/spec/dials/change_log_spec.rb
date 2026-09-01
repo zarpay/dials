@@ -37,9 +37,9 @@ RSpec.describe "Dial change log", type: :model do
     expect(Dials.changes).to be_empty
   end
 
-  it "persists to the dial_changes table (append-only, created_at only)" do
+  it "persists to the append-only dials table (created_at only)" do
     Dials.adjust_checkout_fee_bps(300, actor: actor)
-    row = Dials::ActiveRecord::Change.sole
+    row = Dials::ActiveRecord::Entry.sole
     expect(row.key).to eq("checkout_fee_bps")
     expect(row).not_to respond_to(:updated_at)
   end

@@ -8,9 +8,10 @@ immediately, and all processes converge within a bounded interval.
 ## The snapshot
 
 Each process holds one immutable **Snapshot**: every stored global override
-and every scoped override, loaded in one query (plus one for the version),
+and every scoped override — each stream's newest row — loaded in one query
+(plus one for the version),
 deep-frozen. A read
-(`Dials.use_checkout_fee_bps(market: "KE")`) is a registry lookup plus a
+(`Dials.checkout_fee_bps(market: "KE")`) is a registry lookup plus a
 hash lookup into the snapshot. The demo app pins this
 with a spec that runs 100 reads under a SQL subscriber and asserts **zero
 queries**.
@@ -38,10 +39,10 @@ Dials.configure do |config|
 end
 ```
 
-The version is the change log's **row count plus max id**. Every write
-appends a change row in the same transaction as the data it describes, so
-the version moves on every set **and every clear** (a `MAX(updated_at)`
-heartbeat would miss deletions; the change log doesn't). The count matters:
+The version is the table's **row count plus max id**. The table is
+append-only — every write, set or clear, INSERTs exactly one row — so the
+version moves on every write by construction (there are no deletions for a
+heartbeat to miss). The count matters:
 max id alone has a gap-commit hole — transaction A claims id 10, B claims
 and commits id 11, then A commits; a process that already probed 11 would
 never see A's write. The table is append-only, so the count is

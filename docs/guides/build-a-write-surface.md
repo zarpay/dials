@@ -14,7 +14,7 @@ One note on API choice: this surface uses the key-taking primitives
 (`Dials.get` / `Dials.set` / `Dials.clear`) rather than the generated
 per-dial methods, because the dial key arrives as a request param — this is
 exactly the dynamic-access case the primitives exist for. Application code
-with the dial in hand uses `Dials.use_checkout_fee_bps(...)` and friends.
+with the dial in hand uses `Dials.checkout_fee_bps(...)` and friends.
 
 ## Render from one overview
 
@@ -139,6 +139,6 @@ they're replacing.
 
 Register a page (not a resource — there's no model to CRUD) that renders
 from `Dials.registry` and posts to the two write actions above. Do **not**
-register the gem's internal models (`Dials::ActiveRecord::Override` etc.) as
+register the gem's internal model (`Dials::ActiveRecord::Entry`) as
 editable resources: direct model writes bypass validation, attribution, and
 cache busting — all three of which are the point.

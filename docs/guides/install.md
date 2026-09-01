@@ -12,12 +12,12 @@ bin/rails db:migrate
 
 The generator creates:
 
-- **One migration** for the two gem-owned tables — `dials` (one row per
-  stored override; a global is the override at the empty scope) and
-  `dial_changes` (attributed history and version counter). All value columns
-  are JSON **text** (portable across PostgreSQL, MySQL, and SQLite; nothing
-  ever queries inside a value, so jsonb buys nothing — see
-  [Caching](/concepts/caching)).
+- **One migration** for the single gem-owned table — `dials`, append-only:
+  one row per write, where the newest row per (key, scope) is the current
+  override. State, attributed history, and the cache's version counter are
+  the same rows. Values are JSON **text** (portable across PostgreSQL,
+  MySQL, and SQLite; nothing ever queries inside a value, so jsonb buys
+  nothing — see [Caching](/concepts/caching)).
 - **`config/initializers/dials.rb`** with a commented starter registry.
 
 ## 2. Configure and declare
@@ -58,7 +58,7 @@ class Pricing::QuoteService
   end
 
   def fee_cents(subtotal_cents)
-    (subtotal_cents * Dials.use_checkout_fee_bps(market: @market)) / 10_000
+    (subtotal_cents * Dials.checkout_fee_bps(market: @market)) / 10_000
   end
 end
 ```

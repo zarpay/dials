@@ -14,9 +14,11 @@ Declares one dial (inside a `define` block). Raises
 constraint keyword doesn't apply to the type, the default fails its own
 schema, or a generated method name is already taken.
 
-Each declaration generates the dial's three methods on `Dials`:
-`use_<key>`, `adjust_<key>`, `clear_<key>` (see below). They are defined at
-declaration time — real methods, not `method_missing`.
+Each declaration generates the dial's three methods on `Dials`: the bare
+`<key>` reader, `adjust_<key>`, and `clear_<key>` (see below). They are
+defined at declaration time — real methods, not `method_missing`. Because
+the reader is the bare name, a dial cannot share a name with a `Dials`
+method (`:store`, `:cache`, `:changes`, ...) — that raises at boot.
 
 | Argument | Type | Required | Notes |
 |---|---|---|---|
@@ -79,13 +81,13 @@ methods it always means attribution, never scope.
 
 ## Reading
 
-### `Dials.use_<key>(**scope) → value`
+### `Dials.<key>(**scope) → value`
 
 The generated reader:
 
 ```ruby
-Dials.use_signups_enabled                  # global-only dial
-Dials.use_checkout_fee_bps(market: "KE")   # varied dial
+Dials.signups_enabled                  # global-only dial
+Dials.checkout_fee_bps(market: "KE")   # varied dial
 ```
 
 Resolves scoped override → global override → code default. Scope must name every
@@ -95,9 +97,9 @@ are strings.
 
 ### `Dials.get(key, **scope) → value`
 
-The key-taking primitive under `use_<key>`, for code that receives the key
-at runtime (an admin surface, a console). Same semantics; also raises
-`Dials::UnknownDial` for an undeclared key.
+The key-taking primitive under the bare `<key>` reader, for code that
+receives the key at runtime (an admin surface, a console). Same semantics;
+also raises `Dials::UnknownDial` for an undeclared key.
 
 ### `Dials.scoped_overrides(key) → { scope => value }`
 

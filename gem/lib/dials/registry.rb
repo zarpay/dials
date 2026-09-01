@@ -18,7 +18,8 @@ module Dials
     end
 
     # DSL entry point used by `Dials.define { dial ... }`. Registering a key
-    # also generates its per-dial methods (Dials.use_<key> and friends);
+    # also generates its per-dial methods (the Dials.<key> reader and the
+    # adjust_/clear_ writers);
     # Generated.install! checks for name collisions before defining anything,
     # so a raise here leaves neither a definition nor a stray method behind.
     def dial(key, **)

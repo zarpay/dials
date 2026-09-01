@@ -14,10 +14,10 @@ Gem::Specification.new do |spec|
     giving up code review as the source of truth. Each dial is declared in
     code with a default, a type, JSON-Schema-style constraints, and optional
     dimensions (per market, per platform, ...); runtime overrides live in
-    two small database tables, resolve scoped override → global override →
-    code default, are served from a per-process cache, and every write is
-    attributed in an append-only change log with optional stale-write
-    protection.
+    one small append-only table (state and attributed history are the same
+    rows), resolve scoped override → global override → code default, are
+    served from a per-process cache, and every write supports optional
+    stale-write protection.
   TEXT
   spec.homepage = "https://github.com/zarpay/dials"
   spec.license = "MIT"

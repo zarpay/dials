@@ -64,18 +64,18 @@ Dials.define do
 end
 ```
 
-Each declaration generates the dial's methods — read with `use_`, write with
-`adjust_`, remove an override with `clear_`:
+Each declaration generates the dial's methods — read with the bare dial
+name, write with `adjust_`, remove an override with `clear_`:
 
 ```ruby
-Dials.use_checkout_fee_bps(market: "KE")   # => 250   (code default)
+Dials.checkout_fee_bps(market: "KE")   # => 250   (code default)
 
 Dials.adjust_checkout_fee_bps(120, actor: current_admin, market: "BD")
-Dials.use_checkout_fee_bps(market: "BD")   # => 120   (scoped override)
-Dials.use_checkout_fee_bps(market: "KE")   # => 250   (still the default)
+Dials.checkout_fee_bps(market: "BD")   # => 120   (scoped override)
+Dials.checkout_fee_bps(market: "KE")   # => 250   (still the default)
 
 Dials.clear_checkout_fee_bps(actor: current_admin, market: "BD")
-Dials.use_checkout_fee_bps(market: "BD")   # => 250   (back to code)
+Dials.checkout_fee_bps(market: "BD")   # => 250   (back to code)
 
 Dials.changes(key: :checkout_fee_bps)
 # => [#<ChangeRecord action="clear" actor_label="keith@..." ...>, ...]

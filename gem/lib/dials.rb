@@ -35,7 +35,7 @@ require_relative "dials/testing"
 #
 # Declaring a dial generates its methods (see Generated):
 #
-#   Dials.use_base_fee(market: "KE")                  # read
+#   Dials.base_fee(market: "KE")                        # read
 #   Dials.adjust_base_fee(25, actor: ops, market: "KE") # write
 #   Dials.clear_base_fee(actor: ops, market: "KE")      # remove an override
 #
@@ -71,8 +71,9 @@ module Dials
     #     dial :signups_enabled, default: true, type: :boolean
     #   end
     #
-    # Each declaration generates the dial's methods: use_merchant_fee_bps,
-    # adjust_merchant_fee_bps, clear_merchant_fee_bps (see Generated).
+    # Each declaration generates the dial's methods: merchant_fee_bps (the
+    # reader), adjust_merchant_fee_bps, clear_merchant_fee_bps (see
+    # Generated).
     def define(&)
       registry.instance_eval(&)
     end
@@ -107,8 +108,8 @@ module Dials
 
     # -- reads ---------------------------------------------------------------
 
-    # Resolve a dial by key — the primitive under the generated use_<key>
-    # methods, for callers that receive the key at runtime. Scope is passed
+    # Resolve a dial by key — the primitive under the generated readers,
+    # for callers that receive the key at runtime. Scope is passed
     # as keyword arguments and must name every dimension the dial declares —
     # no more, no less:
     #

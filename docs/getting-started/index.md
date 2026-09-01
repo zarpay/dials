@@ -8,9 +8,9 @@ bin/rails generate dials:install
 bin/rails db:migrate
 ```
 
-The generator creates one migration (two tables: `dials` — one row per
-stored override, `dial_changes` — the attributed history) and
-`config/initializers/dials.rb`.
+The generator creates one migration (a single append-only `dials` table —
+current state, attributed history, and the cache's version counter are the
+same rows) and `config/initializers/dials.rb`.
 
 ## Declare your first dials
 
@@ -62,16 +62,18 @@ declaration can hand its rules to any JSON Schema tooling via
 A dial with no `dimensions:` is **global-only**: it can never hold per-scope
 values, which is exactly what you want for a kill switch.
 
-Declaring a dial generates its methods: `use_<key>` to read,
-`adjust_<key>` to write, `clear_<key>` to remove an override. They are real
-methods, defined at declaration time — `respond_to?`, tab completion, and
-grep all work.
+Declaring a dial generates its methods: the bare dial name to read
+(`Dials.checkout_fee_bps(market: "KE")`), `adjust_<key>` to write,
+`clear_<key>` to remove an override. They are real methods, defined at
+declaration time — `respond_to?`, tab completion, and grep all work. (One
+consequence: a dial can't be named after a `Dials` method like `:store` or
+`:cache` — that raises at boot.)
 
 ## Read
 
 ```ruby
-Dials.use_signups_enabled                  # global-only dial: no scope
-Dials.use_checkout_fee_bps(market: "KE")   # varied dial: scope required
+Dials.signups_enabled                  # global-only dial: no scope
+Dials.checkout_fee_bps(market: "KE")   # varied dial: scope required
 ```
 
 The scope must name **every** dimension the dial declares — a missing or

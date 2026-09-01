@@ -8,7 +8,7 @@
 without a deploy. A dial is declared in code with a default, a type,
 JSON-Schema-style constraints, and optional dimensions (per market,
 per platform, ...); runtime
-overrides live in two small database tables, resolve
+overrides live in one small append-only table, resolve
 **scoped override → global override → code default**, are served from a
 per-process cache, and every write is attributed in an append-only change
 log.
@@ -20,9 +20,9 @@ Dials.define do
        dimensions: { market: { enum: %w[KE NG BD] } }
 end
 
-Dials.use_checkout_fee_bps(market: "KE")                       # => 250
+Dials.checkout_fee_bps(market: "KE")                       # => 250
 Dials.adjust_checkout_fee_bps(120, actor: admin, market: "BD")
-Dials.use_checkout_fee_bps(market: "BD")                       # => 120
+Dials.checkout_fee_bps(market: "BD")                       # => 120
 ```
 
 ## Repository layout

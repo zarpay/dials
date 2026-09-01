@@ -32,7 +32,7 @@ answer. Until a dial exists whose scope fan-out is genuinely painful
 
 ## An explicit global read (`Dials.global`)
 
-**The idea.** On a varied dial, `Dials.use_<key>` without scope raises by
+**The idea.** On a varied dial, the bare `Dials.<key>` reader without scope raises by
 design — a scopeless read is usually a context-threading shortcut that
 silently serves the wrong value once scoped overrides exist (see
 [Dimensions and Scopes](/concepts/dimensions-and-scopes)). But there may be
@@ -75,21 +75,32 @@ opaque version token from `Dials.overview`, with a mismatch raising
 
 ## Disabling the change log
 
-**The idea.** A mode (config flag plus a generator option to skip the
-`dial_changes` table) for apps that want dials without history.
+**The idea.** A mode for apps that want dials without history.
 
-**Why it waits — and probably always will.** The change log is not just
-history: it is the store's **version counter** — the thing the cache
-staleness probe watches and the value `expected_version:` compares. Turning
-it off would leave other processes never converging after a write and
-stale-write protection with nothing to compare, so a no-log mode needs a
-second versioning mechanism (a dedicated counter row is the obvious
-sketch) plus a silently-empty `Dials.changes`. Meanwhile the
-motivations dissolve on inspection: attribution never needed a User model
-(string actors; `config.default_actor` makes `actor:` optional), a
-PII concern is answered by `config.default_actor = "anonymous"`, and at
-operator write-rates the log stays small forever. An app that truly wants
+**Why it waits — and now definitionally never.** Since the log became the
+state (the append-only table's rows ARE the current overrides, the history,
+and the cache's version counter), "dials without history" is no longer a
+mode the storage could offer — deleting history would delete the state.
+The motivations dissolve on inspection anyway: attribution never needed a
+User model (string actors; `config.default_actor` makes `actor:` optional),
+a PII concern is answered by `config.default_actor = "anonymous"`, and at
+operator write-rates the table stays small forever. An app that truly wants
 no record of operator changes is asking this gem to stop being itself.
+
+## Point-in-time reads (`as_of:`)
+
+**The idea.** "What was the config when the incident started?" — resolve
+against the store as it was at time T, or render a whole overview `as_of:` a
+timestamp.
+
+**What already exists.** Everything: storage is append-only, so the state at
+time T is exactly "rows with created_at ≤ T, newest seq per stream wins".
+This became cheap the moment the log became the state.
+
+**Why it waits.** No surface has asked for it yet. When one does, the open
+questions are API shape (a scoped `Dials.as_of(time) { ... }` block vs.
+`overview(as_of:)`) and whether time-travel reads bypass the cache (they
+should — they're rare, investigative, and never hot-path).
 
 ## Non-ActiveRecord stores
 

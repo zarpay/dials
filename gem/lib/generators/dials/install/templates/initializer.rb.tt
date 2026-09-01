@@ -32,7 +32,7 @@ end
 # takes a callable for rules a schema cannot express.
 #
 # Each declaration generates the dial's methods, e.g. for :merchant_fee_bps:
-#   Dials.use_merchant_fee_bps(market: "KE")
+#   Dials.merchant_fee_bps(market: "KE")
 #   Dials.adjust_merchant_fee_bps(90, actor: current_admin, market: "KE")
 #   Dials.clear_merchant_fee_bps(actor: current_admin, market: "KE")
 Dials.define do

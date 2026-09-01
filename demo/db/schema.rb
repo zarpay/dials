@@ -10,27 +10,18 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_01_150000) do
-  create_table "dial_changes", force: :cascade do |t|
+ActiveRecord::Schema[8.1].define(version: 2026_09_01_160000) do
+  create_table "dials", force: :cascade do |t|
     t.string "action", null: false
     t.string "actor_id"
     t.string "actor_label"
     t.string "actor_type"
     t.datetime "created_at", null: false
-    t.string "key", null: false
-    t.text "new_value"
-    t.text "old_value"
-    t.string "scope"
-    t.index ["key"], name: "index_dial_changes_on_key"
-  end
-
-  create_table "dials", force: :cascade do |t|
-    t.datetime "created_at", null: false
     t.string "key", limit: 100, null: false
     t.string "scope", limit: 255, null: false
-    t.datetime "updated_at", null: false
-    t.text "value", null: false
-    t.bigint "version", null: false
-    t.index ["key", "scope"], name: "index_dials_on_key_and_scope", unique: true
+    t.bigint "seq", null: false
+    t.text "value"
+    t.index ["key", "scope", "seq"], name: "index_dials_on_key_and_scope_and_seq", unique: true
+    t.index ["key"], name: "index_dials_on_key"
   end
 end

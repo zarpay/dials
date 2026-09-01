@@ -3,13 +3,16 @@
 module Dials
   # Per-dial generated methods. Declaring `dial :base_fee, ...` defines
   #
-  #   Dials.use_base_fee(**scope)                   # read  (Dials.get)
+  #   Dials.base_fee(**scope)                       # read  (Dials.get)
   #   Dials.adjust_base_fee(value, actor:, **scope) # write (Dials.set)
   #   Dials.clear_base_fee(actor:, **scope)         # clear (Dials.clear)
   #
-  # These are real methods defined at declaration time — never
-  # method_missing — so respond_to?, tab completion, and a grep for
-  # `use_base_fee` all work.
+  # The reader is the bare dial name — reading is what you do with a dial
+  # all day, so it pays no prefix tax; the writers carry their verbs. These
+  # are real methods defined at declaration time — never method_missing — so
+  # respond_to?, tab completion, and a grep for `base_fee` all work. A dial
+  # whose name collides with an existing Dials method (:store, :cache,
+  # :changes, ...) fails at boot rather than shadowing the API.
   #
   # Scope travels as bare keywords here (`market: "KE"`), which is why
   # `actor` and `expected_version` are reserved dimension names: on
@@ -27,7 +30,7 @@ module Dials
       # raise leaves nothing half-installed.
       def install!(definition)
         key = definition.key
-        names = [:"use_#{key}", :"adjust_#{key}", :"clear_#{key}"]
+        names = [key, :"adjust_#{key}", :"clear_#{key}"]
 
         names.each do |name|
           next unless Dials.respond_to?(name, true)

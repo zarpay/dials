@@ -14,14 +14,14 @@ class DefaultActorTest < Minitest::Test
     error = assert_raises(Dials::MissingActor) { Dials.adjust_signups_enabled(false) }
     assert_match(/default_actor/, error.message)
     assert_raises(Dials::MissingActor) { Dials.set(:signups_enabled, false, actor: nil) }
-    assert_equal true, Dials.use_signups_enabled, "a refused write must change nothing"
+    assert_equal true, Dials.signups_enabled, "a refused write must change nothing"
   end
 
   def test_string_default_actor_attributes_writes_that_pass_no_actor
     Dials.configure { |c| c.default_actor = "anonymous" }
     Dials.adjust_signups_enabled(false)
 
-    assert_equal false, Dials.use_signups_enabled
+    assert_equal false, Dials.signups_enabled
     change = Dials.changes.first
     assert_equal "anonymous", change.actor_label
     assert_nil change.actor_type

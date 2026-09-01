@@ -42,7 +42,7 @@ validation error and being an incident.
 ```ruby
 class Checkout::FeeCalculator
   def fee_cents(subtotal_cents)
-    (subtotal_cents * Dials.use_checkout_fee_bps) / 10_000
+    (subtotal_cents * Dials.checkout_fee_bps) / 10_000
   end
 end
 ```
@@ -67,7 +67,7 @@ dial :checkout_fee_bps, default: 250,
 
 ```ruby
 # ...and the reader grows its scope in the same PR:
-Dials.use_checkout_fee_bps(market: @market)
+Dials.checkout_fee_bps(market: @market)
 ```
 
 Note the read signature changed: a varied dial **requires** its scope. Every

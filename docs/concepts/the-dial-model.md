@@ -22,10 +22,10 @@ dial :checkout_fee_bps, default: 250, type: :integer, minimum: 1, maximum: 10_00
 ```
 
 **no row is written anywhere**. The default lives in code, under code review,
-in git history. A row appears in the `dials` table only when an operator
-stores an override — global or scoped. Clearing an override deletes the row
-and resolution falls back to the layer below. "No overrides" and "no rows"
-are synonyms, at every layer.
+in git history. Rows appear in the `dials` table only when an operator acts
+— and since the table is append-only, clearing an override appends its own
+attributed row rather than deleting anything; resolution falls back to the
+layer below while the history of how it got there is preserved.
 
 Why not seed a row per dial at boot (`find_or_create`) and treat the row as
 the value?
@@ -43,50 +43,51 @@ the value?
 - **"No rows" means "nothing overridden".** The table is a worklist of
   deliberate operator decisions, not a mirror of the registry.
 
-## One table of overrides
+## One append-only table
 
-Every stored override is one row in one table, identified by its natural key:
+The gem owns ONE table, and nothing in it is ever updated or deleted:
 
 ```
-dials         (key, scope, value NOT NULL, version)
-              -- UNIQUE (key, scope)
-              -- scope "{}"            = the global override (the empty scope)
-              -- scope {"market":...}  = a scoped override
-              -- version               = per-override stale-write stamp
-
-dial_changes  (append-only history; also the cache's version counter)
+dials   (key, scope, seq, action, value, actor..., created_at)
+        -- UNIQUE (key, scope, seq)
+        -- one row per WRITE; the newest row per (key, scope) is current
+        -- action "set"   = the override's value at that moment
+        -- action "clear" = the override ended here
+        -- scope "{}"     = the global override (the empty scope)
 ```
+
+Every write INSERTs a row. The rows are simultaneously the current state
+(newest per stream wins), the attributed history (`Dials.changes` walks the
+same rows — an override's previous value is literally its previous row, so
+history cannot disagree with what happened), and the cache's version
+counter (the row count).
 
 A global override **is** an override at the empty scope — the resolution
 model already says so ("most specific scope wins; the global constrains
-nothing"), and storage now says the same thing. `"{}"` is not a sentinel: it
-is `Scope.canonical({})`, the truthful canonical encoding of a real value in
+nothing"), and storage says the same thing. `"{}"` is not a sentinel: it is
+`Scope.canonical({})`, the truthful canonical encoding of a real value in
 the scope algebra — unlike an `'XX'` pretending to be a market.
 
-This shape has two structural payoffs:
+Concurrency needs no lock table and no guarded updates: `seq` numbers each
+stream's rows, and `UNIQUE(key, scope, seq)` means every writer claims the
+stream's next slot — of two concurrent writes, the database rejects one.
+That single mechanism is also what makes
+[stale-write protection](/reference/api#expected-version-stale-write-protection)
+atomic against every concurrent write.
 
-- **`value` is NOT NULL.** "No override" is "no row" — there is no
-  NULL-anchor state, no parent-row lifecycle to bookkeep, and the
-  false-vs-NULL kill-switch hazard is excluded by the schema itself, not
-  just by validation.
-- **Concurrency needs no lock table.** Every row carries a `version` stamp,
-  writes are guarded statements (`UPDATE/DELETE ... WHERE version = ?`), and
-  the unique index is the guard for inserts — the database's own row
-  semantics make each write, and
-  [stale-write protection](/reference/api#expected-version-stale-write-protection),
-  atomic against every concurrent write.
-
-An earlier iteration used two tables (a parent `dials` row per key, with
-scoped rows hanging off a foreign key). Why it changed — and why the original
-choice was right in the system this pattern came from — is recorded honestly
-in [Design Decisions](/design/decisions).
+Earlier iterations used two mutable tables, then one. Why the shape kept
+simplifying — and why the original choice was right in the system this
+pattern came from — is recorded honestly in
+[Design Decisions](/design/decisions), with credit to the PR that proposed
+the append-only form.
 
 ## `false` is a value
 
 The gem's validation never confuses "no value" with `false`:
 
 - `Dials.adjust_signups_enabled(false, actor: ...)` stores JSON `false`.
-- SQL `NULL` is reserved for "no override".
+- "No override" is an explicit `clear` row (or no rows at all) — never an
+  ambiguous NULL value.
 - `nil` is not a storable value for any type — removing an override is
   `clear_signups_enabled`, so a stored nil could only ever be an accident,
   and the gem rejects it.

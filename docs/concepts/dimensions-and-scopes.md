@@ -57,10 +57,10 @@ operator with production console access to the API.
 Both reads and writes must name **every** declared dimension:
 
 ```ruby
-Dials.use_free_delivery_threshold(market: "KE", platform: "ios")   # ✓
-Dials.use_free_delivery_threshold(market: "KE")                    # InvalidScope
-Dials.use_free_delivery_threshold                                  # InvalidScope
-Dials.use_signups_enabled(market: "KE")                            # InvalidScope
+Dials.free_delivery_threshold(market: "KE", platform: "ios")   # ✓
+Dials.free_delivery_threshold(market: "KE")                    # InvalidScope
+Dials.free_delivery_threshold                                  # InvalidScope
+Dials.signups_enabled(market: "KE")                            # InvalidScope
 ```
 
 One sentence to remember: **a scoped override matches exactly, or you get the

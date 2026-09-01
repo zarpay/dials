@@ -2,6 +2,28 @@
 
 ## [Unreleased]
 
+- **Breaking: the log is the state — one append-only table.** Adopted from
+  PR #1's minimal-implementation exploration (thanks @fractaledmind), with
+  one addition that closes its acknowledged race: `seq` numbers each
+  (key, scope) stream's rows under `UNIQUE(key, scope, seq)`, so every
+  writer claims the stream's next slot and of two concurrent claims the
+  database rejects one — stale-write protection stays atomic. Every write
+  INSERTs exactly one row; the newest row per stream is the current
+  override (`set` carries a value, `clear` ends it); state, attributed
+  history, and the cache's version counter are the same rows, so history
+  cannot disagree with state and `Dials.changes` derives old values from
+  the previous row instead of trusting a stored copy. The `dial_changes`
+  table is gone; stale-write tokens are stream seqs (immutable rows, so no
+  token is ever revisited). PR #1's other proposals were declined
+  deliberately: no new runtime dependencies (constraints stay JSON Schema,
+  the memory store stays zero-dependency), and no advisory (non-atomic)
+  version checks.
+- **Breaking: readers are the bare dial name.** `Dials.checkout_fee_bps(
+  market: "KE")` replaces `Dials.use_checkout_fee_bps(...)` — also from
+  PR #1. Reading pays no prefix tax; the writers keep their verbs
+  (`adjust_`/`clear_`), so a bare name is always a read. Consequence: a
+  dial cannot share a name with a `Dials` method (`:store`, `:cache`, ...)
+  — the existing boot-time collision check raises `InvalidDefinition`.
 - **Breaking: one vocabulary — `dimensions:` and overrides; "variants" and
   "variation" retire.** The declaration keyword `variants:` is renamed
   `dimensions:` (it always declared dimensions — and "variant" collides with
