@@ -18,17 +18,17 @@ Each declaration generates the dial's three methods on `Dials`:
 `use_<key>`, `adjust_<key>`, `clear_<key>` (see below). They are defined at
 declaration time — real methods, not `method_missing`.
 
-| Argument | Type | Notes |
-|---|---|---|
-| `key` | Symbol/String | unique across the app; the only positional argument |
-| `default:` | value | the code default; validated like any stored value |
-| `type:` | Symbol | `:boolean` `:integer` `:float` `:string` `:json` |
-| `label:` | String | defaults to the humanized key |
-| `unit:` | String | display metadata (`"bps"`, `"cents"`, `"hours"`) |
-| `description:` | String | shown on admin surfaces; write one |
-| `variants:` | Hash or Array | variant dimensions; see below |
-| `validate:` | callable | escape hatch for rules a schema cannot express; returns truthy for storable. Not serializable — prefer the schema keywords |
-| *constraints* | keywords | value constraints in JSON Schema's vocabulary; see below |
+| Argument | Type | Required | Notes |
+|---|---|---|---|
+| `key` | Symbol/String | yes | unique across the app; the only positional argument |
+| `default:` | value | yes | the code default; validated like any stored value |
+| `type:` | Symbol | yes | `:boolean` `:integer` `:float` `:string` `:json` |
+| `label:` | String | no | defaults to the humanized key |
+| `unit:` | String | no | display metadata (`"bps"`, `"cents"`, `"hours"`) |
+| `description:` | String | no | shown on admin surfaces; write one |
+| `variants:` | Hash or Array | no | variant dimensions; see below |
+| `validate:` | callable | no | escape hatch for rules a schema cannot express; returns truthy for storable. Not serializable — prefer the schema keywords |
+| *constraints* | keywords | no | value constraints in JSON Schema's vocabulary; see below |
 
 ### Constraints
 

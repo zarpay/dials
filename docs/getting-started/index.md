@@ -39,14 +39,17 @@ end
 
 Each `dial` takes a key and:
 
-| Option | Meaning |
-|---|---|
-| `default:` | the **code default** — what the dial serves until an operator overrides it |
-| `type:` | `:boolean`, `:integer`, `:float`, `:string`, or `:json` |
-| *constraints* | optional JSON Schema keywords for the type — `minimum:`/`maximum:` for numbers, `min_length:`/`max_length:`/`pattern:` for strings, `enum:` for any type, `properties:`/`required:` for `:json` |
-| `validate:` | optional callable — the escape hatch for rules a schema cannot express |
-| `variants:` | optional — the dial's variant dimensions (see below) |
-| `label:` / `unit:` / `description:` | metadata for the admin surface you build |
+| Option | Required | Meaning |
+|---|---|---|
+| `default:` | **yes** | the **code default** — what the dial serves until an operator overrides it |
+| `type:` | **yes** | `:boolean`, `:integer`, `:float`, `:string`, or `:json` |
+| *constraints* | no | JSON Schema keywords for the type — `minimum:`/`maximum:` for numbers, `min_length:`/`max_length:`/`pattern:` for strings, `enum:` for any type, `properties:`/`required:` for `:json` |
+| `validate:` | no | callable — the escape hatch for rules a schema cannot express |
+| `variants:` | no | the dial's variant dimensions (see below) |
+| `label:` / `unit:` / `description:` | no | metadata for the admin surface you build |
+
+A key, a `default:`, and a `type:` make a complete declaration — everything
+else is opt-in.
 
 The constraints are deliberately not a bespoke vocabulary: they are **JSON
 Schema keywords**, snake_cased for Ruby. If you've written `minimum` /
