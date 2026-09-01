@@ -40,10 +40,7 @@ class ReadingTest < DialsTest
   end
 
   def test_the_most_specific_stored_scope_wins
-    Dials.define do
-      dial :fee, default: 250, type: Integer,
-           dimensions: { market: %w[KE BD], platform: %w[ios android] }
-    end
+    declare_fee_by_market_and_platform
 
     Dials.adjust(:fee, 300, actor: OPS)
     Dials.adjust(:fee, 200, market: "BD", actor: OPS)
@@ -55,10 +52,7 @@ class ReadingTest < DialsTest
   end
 
   def test_a_partial_scope_covers_every_dimension_it_does_not_name
-    Dials.define do
-      dial :fee, default: 250, type: Integer,
-           dimensions: { market: %w[KE BD], platform: %w[ios android] }
-    end
+    declare_fee_by_market_and_platform
 
     Dials.adjust(:fee, 150, platform: "ios", actor: OPS)
 
@@ -68,10 +62,7 @@ class ReadingTest < DialsTest
   end
 
   def test_equally_specific_scopes_are_broken_by_declaration_order
-    Dials.define do
-      dial :fee, default: 250, type: Integer,
-           dimensions: { market: %w[KE BD], platform: %w[ios android] }
-    end
+    declare_fee_by_market_and_platform
 
     Dials.adjust(:fee, 111, market: "BD", actor: OPS)
     Dials.adjust(:fee, 222, platform: "ios", actor: OPS)

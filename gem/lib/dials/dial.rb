@@ -35,6 +35,9 @@ module Dials
       @key = key.to_sym
       @type = matcher(type)
       @dimensions = dimensions.to_h { |name, values| [name.to_sym, matcher(values)] }.freeze
+      # Declaration order as a lookup. best_match runs on every read of an
+      # overridden dial, and this never changes after the object is frozen.
+      @dimension_rank = @dimensions.keys.each_with_index.to_h.freeze
       @label = label || @key.to_s.tr("_", " ").capitalize
       @unit = unit
       @description = description
@@ -69,9 +72,6 @@ module Dials
       match.nil? ? default : match.last
     end
 
-    # The global value, for dials that do not vary.
-    def value = self.for
-
     # Turn the dial. With no scope this moves the global value; with one it
     # moves the value for exactly those dimensions. The actor lands in the
     # change log.
@@ -100,7 +100,7 @@ module Dials
     end
 
     # Every stored override for this dial: { scope(Hash) => value }.
-    def overrides = Dials.overrides.fetch(key, {})
+    def overrides = Dials.overrides.fetch(key) { {} }
 
     # An opaque, monotonic stamp for one override — the id of the row that last
     # wrote it, or 0 when nothing is stored. Render it into a form alongside
@@ -111,13 +111,11 @@ module Dials
     # `cache_ttl` old would compare the caller against a past they never saw.
     # Ids only ever grow, so a cleared-and-reset override cannot revisit an old
     # token.
-    def version(**scope)
-      Record.where(key: key.to_s, scope: Scope.dump(check_scope!(scope))).maximum(:id) || 0
-    end
+    def version(**scope) = stored_version(check_scope!(scope))
 
     # This dial's change log, newest first — every adjustment and reset ever
     # made, with the actor who made it.
-    def history(limit: 50) = Record.where(key: key.to_s).order(id: :desc).limit(limit)
+    def history(limit: 50) = Record.history(key: key, limit: limit)
 
     # Validate a candidate value and return it in the form it would be stored
     # and read back as. Public because an admin form wants to ask "would this
@@ -158,11 +156,13 @@ module Dials
     def assert_unchanged!(scope, expected)
       return if expected.nil?
 
-      current = Record.where(key: key.to_s, scope: Scope.dump(scope)).maximum(:id) || 0
+      current = stored_version(scope)
       return if current == expected
 
       raise StaleWrite, "#{key} changed since you read it (you saw #{expected}, it is now #{current})"
     end
+
+    def stored_version(normalized_scope) = Record.version_for(key, Scope.dump(normalized_scope))
 
     def validate_declaration!
       if key.length > MAX_KEY_LENGTH
@@ -203,10 +203,9 @@ module Dials
     # later ones. A stored scope matches when every pair it names is in the
     # request, so a partial scope ({market: "KE"}) covers every platform.
     def best_match(stored, requested)
-      order = dimensions.keys
       stored
         .select { |scope, _| scope.all? { |name, value| requested[name] == value } }
-        .min_by { |scope, _| [-scope.size, scope.keys.map { order.index(_1) }.sort] }
+        .min_by { |scope, _| [-scope.size, scope.keys.map { @dimension_rank[_1] }.sort] }
     end
   end
 end

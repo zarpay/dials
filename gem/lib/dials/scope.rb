@@ -21,6 +21,9 @@ module Dials
     module_function
 
     def normalize(scope)
+      # The modal read names no scope at all; skip building a hash to say so.
+      return scope if scope.empty?
+
       normalized = scope.to_h { |name, value| [name.to_sym, value.to_s] }
       raise InvalidScope, "scope names a dimension twice: #{scope.keys.inspect}" if normalized.size != scope.size
 

@@ -133,6 +133,20 @@ class WritingTest < DialsTest
     assert_raises(ActiveRecord::ReadOnlyRecord) { Dials[:signups_enabled].history.first.update!(value: "true") }
   end
 
+  def test_history_hands_back_an_array_not_a_live_relation
+    declare_fee_and_switch
+    Dials.adjust(:signups_enabled, false, actor: OPS)
+
+    # A relation would carry update_all and delete_all over the one table whose
+    # append-only shape the version counter and the cache both rest on —
+    # neither of which readonly? can stop.
+    [Dials[:signups_enabled].history, Dials.history].each do |log|
+      assert_instance_of Array, log
+      refute_respond_to log, :update_all
+      refute_respond_to log, :delete_all
+    end
+  end
+
   def test_a_value_that_would_not_survive_the_database_is_refused
     Dials.define { dial :blob, default: { "a" => 1 }, type: Hash }
 

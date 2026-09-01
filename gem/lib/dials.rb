@@ -82,9 +82,11 @@ module Dials
   end
 
   class << self
-    # Seconds between checks for writes made by *other* processes. 0 checks on
-    # every read; the default trades five seconds of convergence for one query
-    # per five seconds per process.
+    # Seconds between checks for writes made by *other* processes. 0 (or nil)
+    # checks on every read; the default trades five seconds of convergence for
+    # one query per five seconds per process. There is no "never check" setting
+    # — a cache that can never notice another process is a cache that can be
+    # wrong forever.
     attr_accessor :cache_ttl
 
     # A callable turning an actor into the label stored on every change.
@@ -122,7 +124,7 @@ module Dials
     # and the next from after. => [[Dial, { scope => value }], ...]
     def catalog
       snapshot = overrides
-      all.map { |dial| [dial, snapshot.fetch(dial.key, {})] }
+      all.map { |dial| [dial, snapshot.fetch(dial.key) { {} }] }
     end
 
     # Not public API; DSL#dial calls it.
@@ -182,13 +184,13 @@ module Dials
     end
 
     # The whole change log, newest first.
-    def history(limit: 50) = Record.order(id: :desc).limit(limit)
+    def history(limit: 50) = Record.history(limit: limit)
 
     # -- writing -------------------------------------------------------------
 
     # Turn a dial. With no scope this moves the global value; with one it moves
-    # the value for exactly those dimensions. `actor:` is required and lands in
-    # the change log.
+    # the value for exactly those dimensions. The actor lands in the change log,
+    # and is required unless the app declares a `default_actor`.
     #
     #   Dials.adjust(:checkout_fee_bps, 120, market: "BD", actor: current_admin)
     #
@@ -214,7 +216,7 @@ module Dials
       Record.create!(
         key: key.to_s,
         scope: scope,
-        value: value.nil? ? nil : JSON.generate(value),
+        value: Record.encode(value),
         actor_type: (actor.class.name unless actor.is_a?(String)),
         actor_id: (actor.id.to_s if actor.respond_to?(:id)),
         actor_label: (actor_label || DEFAULT_ACTOR_LABEL).call(actor).to_s

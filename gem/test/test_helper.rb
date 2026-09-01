@@ -46,6 +46,15 @@ class DialsTest < Minitest::Test
     end
   end
 
+  # The dial the resolution tests need: two dimensions, so specificity and
+  # declaration-order tie-breaking have something to work with.
+  def declare_fee_by_market_and_platform
+    Dials.define do
+      dial :fee, default: 250, type: Integer,
+           dimensions: { market: %w[KE BD], platform: %w[ios android] }
+    end
+  end
+
   def count_queries
     queries = []
     subscriber = ActiveSupport::Notifications.subscribe("sql.active_record") do |_, _, _, _, payload|
