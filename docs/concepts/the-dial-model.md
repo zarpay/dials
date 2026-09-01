@@ -48,11 +48,13 @@ the value?
 Every stored override is one row in one table, identified by its natural key:
 
 ```
-dials        (key, scope, value NOT NULL, version)   -- UNIQUE (key, scope)
-             -- scope "{}"          = the global override (the empty scope)
-             -- scope {"market":..} = a scoped override
-             -- version             = per-override stale-write stamp
-dial_changes (append-only history; also the cache's version counter)
+dials         (key, scope, value NOT NULL, version)
+              -- UNIQUE (key, scope)
+              -- scope "{}"            = the global override (the empty scope)
+              -- scope {"market":...}  = a scoped override
+              -- version               = per-override stale-write stamp
+
+dial_changes  (append-only history; also the cache's version counter)
 ```
 
 A global override **is** an override at the empty scope — the resolution
