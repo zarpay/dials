@@ -82,6 +82,12 @@ module Dials
   end
 
   class << self
+    # A few methods below are marked `@api private`. They are the seam between
+    # this facade and Dial, which call each other by name — and Ruby's `private`
+    # forbids an explicit receiver, so it cannot express "internal to the gem".
+    # The marker is the whole contract: they are not supported surface, they may
+    # change shape, and `Dials.` in front of one outside this gem is a mistake.
+
     # Seconds between checks for writes made by *other* processes. 0 (or nil)
     # checks on every read; the default trades five seconds of convergence for
     # one query per five seconds per process. There is no "never check" setting
@@ -115,7 +121,6 @@ module Dials
       end
     end
 
-    def registry = @registry ||= {}
     def all = registry.values
     def each(&) = all.each(&)
 
@@ -127,7 +132,7 @@ module Dials
       all.map { |dial| [dial, snapshot.fetch(dial.key) { {} }] }
     end
 
-    # Not public API; DSL#dial calls it.
+    # @api private — DSL#dial calls it.
     def register(dial)
       raise InvalidDial, "dial #{dial.key} is already declared" if registry.key?(dial.key)
       raise InvalidDial, "dial #{dial.key} would define Dials.#{dial.key}, which already exists" if respond_to?(dial.key, true)
@@ -140,7 +145,9 @@ module Dials
 
     # -- reading -------------------------------------------------------------
 
-    # Every stored override in the system, cached per process:
+    # @api private — the cache's own representation, read by Dial on every
+    # resolve. `Dials.catalog` and `Dial#overrides` are the supported views;
+    # this shape is free to change.
     #
     #   { key(Symbol) => { scope(Hash) => value } }
     #
@@ -208,7 +215,7 @@ module Dials
       self[key].reset(actor: actor, if_unchanged_since: if_unchanged_since, **scope)
     end
 
-    # Not public API; Dial#adjust and Dial#reset call it.
+    # @api private — Dial#adjust and Dial#reset call it.
     def append(key, scope, value, actor)
       actor = default_actor.respond_to?(:call) ? default_actor.call : default_actor if actor.nil?
       raise Error, "every write needs an actor: (who is turning this dial?)" if actor.nil?
@@ -251,6 +258,7 @@ module Dials
       Thread.current[STUBS] = previous
     end
 
+    # @api private — Dial#for consults it after validating the scope.
     def stubs = Thread.current[STUBS]
 
     # Test hook: forget every declaration and its generated reader.
@@ -261,6 +269,10 @@ module Dials
     end
 
     private
+
+    # Every caller is in this file and uses an implicit receiver, so unlike the
+    # seam methods above this one can be, and therefore is, actually private.
+    def registry = @registry ||= {}
 
     def probe_due?
       return true if cache_ttl.to_f <= 0
