@@ -22,6 +22,12 @@ module Dials
   class Definition
     TYPES = %i[boolean integer float string json].freeze
 
+    # Keys land in an indexed VARCHAR(100) that shares a composite unique
+    # index with the 255-byte canonical scope; the explicit cap keeps that
+    # index inside every supported database's budget (and generated method
+    # names sane).
+    MAX_KEY_LENGTH = 100
+
     attr_reader :key, :default, :type, :label, :unit, :description, :dimensions, :schema
 
     def initialize(key, default:, type:, label: nil, unit: nil, description: nil,
@@ -140,6 +146,10 @@ module Dials
     end
 
     def validate_definition!
+      if key.length > MAX_KEY_LENGTH
+        raise InvalidDefinition, "#{key}: key exceeds #{MAX_KEY_LENGTH} characters"
+      end
+
       names = dimension_names
       raise InvalidDefinition, "#{key}: duplicate variant dimension" unless names.uniq.length == names.length
 

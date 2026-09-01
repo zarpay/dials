@@ -5,9 +5,9 @@
 Every read resolves through the same three layers, top down:
 
 ```
-1. variation        — a stored value for exactly this scope   (dial_variations)
-2. global override  — a stored value for everywhere else      (dials)
-3. code default     — the value declared in Dials.define      (your initializer)
+1. variation        — a stored override for exactly this scope
+2. global override  — a stored override for everywhere else
+3. code default     — the value declared in Dials.define (your initializer)
 ```
 
 The first layer that has a value wins. That is the entire model; everything
@@ -22,10 +22,10 @@ dial :checkout_fee_bps, default: 250, type: :integer, minimum: 1, maximum: 10_00
 ```
 
 **no row is written anywhere**. The default lives in code, under code review,
-in git history. A `dials` row appears only when an operator overrides the
-global; a `dial_variations` row appears only when an operator overrides a
-specific scope. Clearing an override deletes the row and resolution falls
-back to the layer below.
+in git history. A row appears in the `dials` table only when an operator
+stores an override — global or scoped. Clearing an override deletes the row
+and resolution falls back to the layer below. "No overrides" and "no rows"
+are synonyms, at every layer.
 
 Why not seed a row per dial at boot (`find_or_create`) and treat the row as
 the value?
@@ -43,37 +43,41 @@ the value?
 - **"No rows" means "nothing overridden".** The table is a worklist of
   deliberate operator decisions, not a mirror of the registry.
 
-## The two-table shape
+## One table of overrides
 
-Variations are rows with a real `NOT NULL` foreign key to their parent:
+Every stored override is one row in one table, identified by its natural key:
 
 ```
-dials            (key UNIQUE, value)            -- value NULL = no global override
-dial_variations  (dial_id FK NOT NULL, scope, value)  -- UNIQUE (dial_id, scope)
+dials        (key, scope, value NOT NULL)   -- UNIQUE (key, scope)
+             -- scope "{}"          = the global override (the empty scope)
+             -- scope {"market":..} = a variation
+dial_changes (append-only history; also the version counter)
+dial_locks   (single row every write locks; serializes writes)
 ```
 
-Two alternatives were rejected, deliberately (full reasoning in
-[Design Decisions](/design/decisions)):
+A global override **is** an override at the empty scope — the resolution
+model already says so ("most specific scope wins; the global constrains
+nothing"), and storage now says the same thing. `"{}"` is not a sentinel: it
+is `Scope.canonical({})`, the truthful canonical encoding of a real value in
+the scope algebra — unlike an `'XX'` pretending to be a market.
 
-- **Sibling rows related by a shared key string** (a `market` column on one
-  table with an `'XX'` sentinel row for "global"): the relationship between a
-  global and its variations becomes a naming convention rather than a
-  constraint, every reader must know the sentinel, and "no variation without
-  a global" is unenforceable.
-- **Self-referential `parent_id` rows in one table**: carries the FK
-  guarantee but makes every present and future reader responsible for
-  filtering child rows — one forgotten `WHERE parent_id IS NULL` and a
-  country's value is served globally.
+This shape has two structural payoffs:
 
-With the separate table, the FK makes "no variation without a parent" a
-database constraint, and there is no sentinel because **the parent is the
-global**.
+- **`value` is NOT NULL.** "No override" is "no row" — there is no
+  NULL-anchor state, no parent-row lifecycle to bookkeep, and the
+  false-vs-NULL kill-switch hazard is excluded by the schema itself, not
+  just by validation.
+- **Writes serialize on one lock.** Every write takes `SELECT ... FOR
+  UPDATE` on the single `dial_locks` row inside its transaction, which makes
+  [stale-write protection](/reference/api#expected-version-stale-write-protection)
+  sound against every concurrent write and gives the change log a true total
+  order. Operators turn dials at human rates; the serialization costs
+  nothing that matters.
 
-One subtlety: `dials.value` is nullable. If a dial has variations but no
-global override (or its global override is cleared while variations exist),
-the parent row survives with `value NULL` purely as the FK anchor. When the
-last override of any kind is cleared, the parent row is removed too — "no
-overrides" and "no rows" stay synonyms.
+An earlier iteration used two tables (a parent `dials` row per key, with
+variations hanging off a foreign key). Why it changed — and why the original
+choice was right in the system this pattern came from — is recorded honestly
+in [Design Decisions](/design/decisions).
 
 ## `false` is a value
 

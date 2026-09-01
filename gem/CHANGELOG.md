@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+- **Breaking: one table of overrides; every write serializes on the anchor
+  lock.** The `dials` + `dial_variations` pair is replaced by a single
+  `dials` table — one row per stored override, keyed by `(key, scope)` with
+  the global stored as the canonical empty scope `"{}"` and `value` NOT NULL
+  (no anchor rows, no NULL-vs-false ambiguity, "no override" = "no row" at
+  every layer; internally the model is `Dials::ActiveRecord::Override`).
+  Additionally — closing a hole an adversarial design review caught — EVERY
+  write now takes the `dial_locks` row lock, not just CAS writes, which
+  makes `expected_version:` sound against all concurrent gem writes and
+  gives the change log a true total order. The change log keeps NULL scope
+  for global changes (history's stable encoding). Snapshot data now loads in
+  one query; the version's two aggregates come from one statement. Explicit
+  column limits (key 100 chars — now validated at declaration — and scope
+  255) keep the composite unique index inside every supported database's
+  budget. Regenerate the install migration; there is no data migration
+  (pre-release).
 - **`config.default_actor` — attribution without a User model.** Apps with
   no user identity can declare a fallback actor once (a string/object, or a
   callable evaluated per write, e.g. `-> { ENV.fetch("USER", "console") }`)

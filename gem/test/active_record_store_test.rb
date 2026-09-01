@@ -14,19 +14,12 @@ class ActiveRecordStoreTest < Minitest::Test
     # Mirrors lib/generators/dials/install/templates/migration.rb.tt.
     ActiveRecord::Schema.define do
       create_table :dials do |t|
-        t.string :key, null: false
-        t.text :value
-        t.timestamps
-      end
-      add_index :dials, :key, unique: true
-
-      create_table :dial_variations do |t|
-        t.references :dial, null: false, foreign_key: true
-        t.string :scope, null: false
+        t.string :key, null: false, limit: 100
+        t.string :scope, null: false, limit: 255
         t.text :value, null: false
         t.timestamps
       end
-      add_index :dial_variations, %i[dial_id scope], unique: true
+      add_index :dials, %i[key scope], unique: true
 
       create_table :dial_locks
 
@@ -51,14 +44,12 @@ class ActiveRecordStoreTest < Minitest::Test
     super
     self.class.establish_schema!
     Dials::ActiveRecord::Change.delete_all
-    Dials::ActiveRecord::Variation.delete_all
-    Dials::ActiveRecord::Setting.delete_all
+    Dials::ActiveRecord::Override.delete_all
     Dials.configure { |c| c.store = :active_record }
     define_standard_dials
   end
 
-  def settings = Dials::ActiveRecord::Setting
-  def variations = Dials::ActiveRecord::Variation
+  def overrides = Dials::ActiveRecord::Override
 
   def test_full_resolution_round_trip
     assert_equal 100, Dials.get(:merchant_fee_bps, market: "KE")
@@ -78,17 +69,26 @@ class ActiveRecordStoreTest < Minitest::Test
 
   def test_no_rows_until_first_override
     Dials.get(:merchant_fee_bps, market: "KE")
-    assert_equal 0, settings.count
+    assert_equal 0, overrides.count
   end
 
-  def test_clearing_global_keeps_parent_row_while_variations_exist
+  def test_a_global_is_the_override_at_the_empty_scope
+    Dials.set(:merchant_fee_bps, 150, actor: ACTOR)
+    row = overrides.sole
+    assert_equal Dials::Scope::GLOBAL, row.scope
+    assert_equal "150", row.value
+  end
+
+  def test_global_and_variations_are_independent_rows
     Dials.set(:merchant_fee_bps, 150, actor: ACTOR)
     Dials.set(:merchant_fee_bps, 90, scope: { market: "KE" }, actor: ACTOR)
+    assert_equal 2, overrides.where(key: "merchant_fee_bps").count
 
+    # Clearing the global deletes exactly its row; the variation survives
+    # with nothing anchoring it — no parent, no NULL-value bookkeeping.
     Dials.clear(:merchant_fee_bps, actor: ACTOR)
-
-    row = settings.find_by!(key: "merchant_fee_bps")
-    assert_nil row.value, "parent row survives as a variation anchor with NULL value"
+    assert_equal [%w[merchant_fee_bps KE]],
+                 overrides.pluck(:key, :scope).map { |k, s| [k, JSON.parse(s)["market"]] }
     assert_equal 90, Dials.get(:merchant_fee_bps, market: "KE")
     assert_equal 100, Dials.get(:merchant_fee_bps, market: "NG"), "global is back to the code default"
   end
@@ -96,26 +96,26 @@ class ActiveRecordStoreTest < Minitest::Test
   def test_removing_the_last_override_removes_all_rows
     Dials.set(:merchant_fee_bps, 90, scope: { market: "KE" }, actor: ACTOR)
     Dials.clear(:merchant_fee_bps, scope: { market: "KE" }, actor: ACTOR)
-    assert_equal 0, settings.count
-    assert_equal 0, variations.count
+    assert_equal 0, overrides.count
   end
 
   def test_clearing_global_without_variations_removes_the_row
     Dials.set(:merchant_fee_bps, 150, actor: ACTOR)
     Dials.clear(:merchant_fee_bps, actor: ACTOR)
-    assert_equal 0, settings.count
+    assert_equal 0, overrides.count
   end
 
   def test_false_survives_the_database_round_trip
     Dials.set(:signups_enabled, false, actor: ACTOR)
     Dials.reload!
     assert_equal false, Dials.get(:signups_enabled)
-    refute_nil settings.find_by!(key: "signups_enabled").value, "false is stored as JSON, not SQL NULL"
+    assert_equal "false", overrides.find_by!(key: "signups_enabled").value,
+                 "false is stored as JSON text — the value column is NOT NULL by schema"
   end
 
   def test_scope_is_stored_canonically
     Dials.set(:free_delivery_threshold, 25, scope: { platform: :ios, "market" => "KE" }, actor: ACTOR)
-    assert_equal '{"market":"KE","platform":"ios"}', variations.sole.scope
+    assert_equal '{"market":"KE","platform":"ios"}', overrides.sole.scope
   end
 
   def test_changes_round_trip_with_attribution
@@ -129,7 +129,7 @@ class ActiveRecordStoreTest < Minitest::Test
     assert_equal 150, changes[1].old_value
     assert_nil changes[2].old_value
     assert_equal ACTOR, changes.first.actor_label
-    assert changes.first.global?
+    assert changes.first.global?, "history keeps NULL scope for global changes"
   end
 
   def test_version_moves_on_every_write_and_powers_the_probe
@@ -163,13 +163,13 @@ class ActiveRecordStoreTest < Minitest::Test
 
     changes.insert_all!([{ id: 10, key: "merchant_fee_bps", action: "set",
                            new_value: "150", created_at: Time.now.utc }])
-    settings.create!(key: "merchant_fee_bps", value: "150")
+    overrides.create!(key: "merchant_fee_bps", scope: Dials::Scope::GLOBAL, value: "150")
     assert_equal 150, Dials.get(:merchant_fee_bps, market: "KE") # cache warm at version [1, 10]
 
     # The "late commit": a lower change id appears without max(id) moving.
     changes.insert_all!([{ id: 5, key: "merchant_fee_bps", action: "set",
                            new_value: "175", created_at: Time.now.utc }])
-    settings.find_by!(key: "merchant_fee_bps").update!(value: "175")
+    overrides.find_by!(key: "merchant_fee_bps").update!(value: "175")
 
     assert_equal 175, Dials.get(:merchant_fee_bps, market: "KE"),
                  "count moved 1 → 2, so the probe must rebuild even though max(id) is still 10"
@@ -177,7 +177,7 @@ class ActiveRecordStoreTest < Minitest::Test
 
   def test_corrupt_global_row_is_quarantined_not_fatal
     Dials.set(:merchant_fee_bps, 150, actor: ACTOR)
-    settings.create!(key: "support_email", value: "{definitely not json")
+    overrides.create!(key: "support_email", scope: Dials::Scope::GLOBAL, value: "{definitely not json")
     Dials.reload!
 
     _out, err = capture_io do
@@ -187,11 +187,10 @@ class ActiveRecordStoreTest < Minitest::Test
     assert_match(/skipping corrupt row/, err)
   end
 
-  def test_malformed_variation_scope_is_quarantined_not_fatal
+  def test_malformed_scope_is_quarantined_not_fatal
     Dials.set(:merchant_fee_bps, 90, scope: { market: "KE" }, actor: ACTOR)
-    parent = settings.find_by!(key: "merchant_fee_bps")
-    variations.insert_all!([{ dial_id: parent.id, scope: "not-json", value: "77",
-                              created_at: Time.now.utc, updated_at: Time.now.utc }])
+    overrides.insert_all!([{ key: "merchant_fee_bps", scope: "not-json", value: "77",
+                             created_at: Time.now.utc, updated_at: Time.now.utc }])
     Dials.reload!
 
     _out, err = capture_io do
@@ -204,7 +203,7 @@ class ActiveRecordStoreTest < Minitest::Test
     Dials.configure { |c| c.cache_ttl = 3600 }
     assert_equal 100, Dials.get(:merchant_fee_bps, market: "KE") # warm
 
-    Dials::ActiveRecord::Setting.transaction do
+    Dials::ActiveRecord::Override.transaction do
       Dials.set(:merchant_fee_bps, 500, actor: ACTOR)
       assert_equal 500, Dials.get(:merchant_fee_bps, market: "KE"),
                    "the writing thread reads its own uncommitted write"
@@ -218,7 +217,7 @@ class ActiveRecordStoreTest < Minitest::Test
 
   def test_committed_transactional_write_is_visible_after_commit
     Dials.configure { |c| c.cache_ttl = 3600 }
-    Dials::ActiveRecord::Setting.transaction do
+    Dials::ActiveRecord::Override.transaction do
       Dials.set(:merchant_fee_bps, 500, actor: ACTOR)
     end
     assert_equal 500, Dials.get(:merchant_fee_bps, market: "KE")
@@ -234,7 +233,7 @@ class ActiveRecordStoreTest < Minitest::Test
 
     Dials.configure { |c| c.cache_ttl = nil } # no probe: only busts converge
 
-    Dials::ActiveRecord::Setting.transaction do
+    Dials::ActiveRecord::Override.transaction do
       Dials.set(:merchant_fee_bps, 500, actor: ACTOR)
       # Simulate another thread publishing a snapshot mid-transaction.
       Dials.cache.snapshot
@@ -280,7 +279,7 @@ class ActiveRecordStoreTest < Minitest::Test
     # counter (it is the change log's max id), so the staleness probe cannot
     # see them — each process needs a manual Dials.reload!. This test pins
     # that documented limitation.
-    settings.create!(key: "support_email", value: JSON.generate("ops@example.com"))
+    overrides.create!(key: "support_email", scope: Dials::Scope::GLOBAL, value: JSON.generate("ops@example.com"))
     Dials.reload!
     assert_equal "ops@example.com", Dials.get(:support_email)
   end
@@ -300,14 +299,12 @@ class ActiveRecordStoreTest < Minitest::Test
     Dials.adjust_signups_enabled(false, actor: ACTOR) # the store moves
 
     changes_before = Dials::ActiveRecord::Change.count
-    # A stale set_variation on a never-overridden dial would create the
-    # parent row before the append — the rollback must take that with it.
     assert_raises(Dials::StaleWrite) do
       Dials.adjust_merchant_fee_bps(999, actor: ACTOR, market: "BD", expected_version: version)
     end
 
     assert_equal changes_before, Dials::ActiveRecord::Change.count
-    refute settings.exists?(key: "merchant_fee_bps"), "the rollback must remove the parent row too"
+    refute overrides.exists?(key: "merchant_fee_bps"), "the rollback must leave no row behind"
   end
 
   def test_stale_write_is_not_a_retryable_error
@@ -325,6 +322,11 @@ class ActiveRecordStoreTest < Minitest::Test
 
     Dials.adjust_merchant_fee_bps(200, actor: ACTOR, expected_version: version)
     assert_equal 200, Dials.use_merchant_fee_bps(market: "KE")
+    assert Dials::ActiveRecord::Lock.exists?(id: Dials::ActiveRecord::Lock::ANCHOR_ID)
+
+    # Every write locks the anchor now — an unconditional one recreates it too.
+    Dials::ActiveRecord::Lock.delete_all
+    Dials.adjust_merchant_fee_bps(300, actor: ACTOR)
     assert Dials::ActiveRecord::Lock.exists?(id: Dials::ActiveRecord::Lock::ANCHOR_ID)
   end
 end

@@ -133,6 +133,6 @@ they're replacing.
 
 Register a page (not a resource — there's no model to CRUD) that renders
 from `Dials.registry` and posts to the two write actions above. Do **not**
-register the gem's internal models (`Dials::ActiveRecord::Setting` etc.) as
+register the gem's internal models (`Dials::ActiveRecord::Override` etc.) as
 editable resources: direct model writes bypass validation, attribution, and
 cache busting — all three of which are the point.

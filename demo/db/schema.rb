@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_01_120000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_01_140000) do
   create_table "dial_changes", force: :cascade do |t|
     t.string "action", null: false
     t.string "actor_id"
@@ -27,23 +27,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_09_01_120000) do
   create_table "dial_locks", force: :cascade do |t|
   end
 
-  create_table "dial_variations", force: :cascade do |t|
-    t.datetime "created_at", null: false
-    t.integer "dial_id", null: false
-    t.string "scope", null: false
-    t.datetime "updated_at", null: false
-    t.text "value", null: false
-    t.index ["dial_id", "scope"], name: "index_dial_variations_on_dial_id_and_scope", unique: true
-    t.index ["dial_id"], name: "index_dial_variations_on_dial_id"
-  end
-
   create_table "dials", force: :cascade do |t|
     t.datetime "created_at", null: false
-    t.string "key", null: false
+    t.string "key", limit: 100, null: false
+    t.string "scope", limit: 255, null: false
     t.datetime "updated_at", null: false
-    t.text "value"
-    t.index ["key"], name: "index_dials_on_key", unique: true
+    t.text "value", null: false
+    t.index ["key", "scope"], name: "index_dials_on_key_and_scope", unique: true
   end
-
-  add_foreign_key "dial_variations", "dials"
 end

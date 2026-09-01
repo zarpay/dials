@@ -2,39 +2,36 @@
 
 class CreateDialsTables < ActiveRecord::Migration[<%= ActiveRecord::Migration.current_version %>]
   def change
-    # A dial's stored global override. A row exists only once something about
-    # the dial has been overridden; `value` is JSON-encoded text, and NULL
-    # means "no global override" (the row is then only a parent for
-    # variations). Values are never queried in SQL — reads go through the
-    # in-process cache — so portable text beats jsonb here.
+    # Stored overrides — one row per override, nothing else. A global
+    # override is the override at the empty scope (stored as the canonical
+    # "{}"); a variation is the override at a non-empty canonical scope
+    # ({"market":"KE"}). No row = no override, at every layer. `value` is
+    # JSON-encoded text and NOT NULL; values are never queried in SQL —
+    # reads go through the in-process cache — so portable text beats jsonb.
+    #
+    # Explicit column limits keep the composite unique index inside every
+    # supported database's index budget (MySQL utf8mb4 in particular):
+    # (100 + 255) * 4 bytes ≈ 1.4KB, well under InnoDB's 3072-byte cap.
     create_table :dials do |t|
-      t.string :key, null: false
-      t.text :value
-      t.timestamps
-    end
-    add_index :dials, :key, unique: true
-
-    # Per-scope overrides. scope is the canonical JSON string of the
-    # variation's dimensions ({"market":"KE"}), unique per dial. The NOT NULL
-    # foreign key is the invariant: no variation without a parent row.
-    create_table :dial_variations do |t|
-      t.references :dial, null: false, foreign_key: true
-      t.string :scope, null: false
+      t.string :key, null: false, limit: 100
+      t.string :scope, null: false, limit: 255
       t.text :value, null: false
       t.timestamps
     end
-    add_index :dial_variations, [:dial_id, :scope], unique: true
+    add_index :dials, [:key, :scope], unique: true
 
-    # Append-only attribution log. Doubles as the cache's version counter
-    # (max id moves on every write). No updated_at: rows are facts.
-    # A single-row anchor for compare-and-swap writes (expected_version:):
-    # writers SELECT ... FOR UPDATE this row to serialize the version check
-    # with the change-log append. One row, no data.
+    # A single-row anchor every dial write locks (SELECT ... FOR UPDATE) to
+    # serialize writes across processes — this is what makes
+    # expected_version: compare-and-swap sound and the change log a true
+    # total order. One row, no data.
     create_table :dial_locks
     reversible do |dir|
       dir.up { execute "INSERT INTO dial_locks (id) VALUES (1)" }
     end
 
+    # Append-only attribution log. Doubles as the cache's version counter
+    # (max id moves on every write). No updated_at: rows are facts. scope is
+    # NULL for global changes (history's stable encoding).
     create_table :dial_changes do |t|
       t.string :key, null: false
       t.string :scope

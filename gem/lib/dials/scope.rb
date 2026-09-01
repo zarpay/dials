@@ -17,6 +17,13 @@ module Dials
   # general (subset match, most-specific wins), so partial scopes are a
   # planned write-side relaxation, not a redesign. See docs/design.
   module Scope
+    # The canonical encoding of the EMPTY scope — what Scope.canonical({})
+    # returns. Storage uses it as the scope of a global override: a global is
+    # simply the override that constrains no dimensions. This is the truthful
+    # encoding of a real value in the scope algebra, not a sentinel invented
+    # outside it.
+    GLOBAL = "{}"
+
     module_function
 
     # Normalize a caller-supplied scope hash into {symbol => string}. A hash

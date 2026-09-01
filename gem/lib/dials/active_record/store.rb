@@ -2,14 +2,22 @@
 
 module Dials
   module Stores
-    # The production store: three ActiveRecord-backed tables (see
-    # Dials::ActiveRecord::Setting / Variation / Change). Implements the same
-    # interface as Stores::Memory; every mutation runs in a transaction with
-    # its change-log row, so the version can never run ahead of or behind the
-    # data it stamps.
+    # The production store: three ActiveRecord-backed tables — dials (one row
+    # per stored override; the global is the override at the empty scope,
+    # stored as Scope::GLOBAL), dial_changes (append-only log and version
+    # counter), and dial_locks (the single-row write-serialization anchor).
+    # Implements the same interface as Stores::Memory; every mutation runs in
+    # a transaction with its change-log row, so the version can never run
+    # ahead of or behind the data it stamps.
+    #
+    # Every write takes SELECT ... FOR UPDATE on the anchor row first, fully
+    # serializing gem writes across processes. That is what makes
+    # expected_version: compare-and-swap sound against every concurrent gem
+    # write (not just other CAS writes) and gives the change log's old/new
+    # values a true total order. Operators turn dials at human rates; the
+    # serialization costs nothing that matters.
     class ActiveRecordStore
-      Setting = Dials::ActiveRecord::Setting
-      Variation = Dials::ActiveRecord::Variation
+      Override = Dials::ActiveRecord::Override
       Change = Dials::ActiveRecord::Change
       Lock = Dials::ActiveRecord::Lock
 
@@ -17,36 +25,36 @@ module Dials
       SKIP = Object.new
 
       # Database races a write can lose and safely re-run once: two processes
-      # creating the same parent row (RecordNotUnique), a clear destroying a
-      # parent while a concurrent set inserts a variation (InvalidForeignKey),
-      # and adapter-reported deadlocks / serialization failures
-      # (TransactionRollbackError covers both).
+      # creating the anchor row (RecordNotUnique — also covers hypothetical
+      # override-insert races from writes made around the gem), and
+      # adapter-reported deadlocks / serialization failures
+      # (TransactionRollbackError covers both). StaleWrite is deliberately
+      # NOT here — a retried CAS would recompute against the new version and
+      # silently defeat the mechanism.
       RETRYABLE = [
         ::ActiveRecord::RecordNotUnique,
-        ::ActiveRecord::InvalidForeignKey,
         ::ActiveRecord::TransactionRollbackError
       ].freeze
 
       def state
         # Version first: if a write lands between these reads, the snapshot
         # carries an older version than its data, and the next probe sees the
-        # version move and rebuilds — stale in the safe direction only.
+        # version move and rebuilds — stale in the safe direction only. The
+        # data itself is ONE query over one table, so a snapshot can no
+        # longer mix pre-write globals with post-write variations.
         current_version = version
 
         globals = {}
-        Setting.where.not(value: nil).pluck(:key, :value).each do |key, raw|
-          value = decode_row(raw, "dials(#{key})")
-          globals[key.to_sym] = value unless value.equal?(SKIP)
-        end
-
         variations = {}
-        Variation.joins(:setting)
-                 .pluck("#{Setting.table_name}.key", "#{Variation.table_name}.scope", "#{Variation.table_name}.value")
-                 .each do |key, scope, raw|
-          value = decode_row(raw, "dial_variations(#{key}, #{scope})")
-          next if value.equal?(SKIP) || !valid_scope_string?(key, scope)
+        Override.pluck(:key, :scope, :value).each do |key, scope, raw|
+          value = decode_row(raw, "dials(#{key}, #{scope})")
+          next if value.equal?(SKIP)
 
-          (variations[key.to_sym] ||= {})[scope] = value
+          if scope == Scope::GLOBAL
+            globals[key.to_sym] = value
+          elsif valid_scope_string?(key, scope)
+            (variations[key.to_sym] ||= {})[scope] = value
+          end
         end
 
         { globals: globals, variations: variations, version: current_version }
@@ -58,17 +66,20 @@ module Dials
       # alone would NOT be enough: transaction A can claim id 10, B claim
       # and commit id 11, and only then A commits — MAX(id) never moves for
       # a process that already saw 11, so A's write would stay invisible
-      # until the next unrelated write. Count catches it (N → N+1).
+      # until the next unrelated write. Count catches it (N → N+1). Both
+      # aggregates come from ONE statement so they describe one committed
+      # state, never two.
       def version
-        [Change.count, Change.maximum(:id) || 0]
+        count, max = Change.pick(Arel.sql("COUNT(*)"), Arel.sql("COALESCE(MAX(id), 0)"))
+        [count, max]
       end
 
       # True when the current thread's connection is inside an open
-      # transaction (typically an application transaction wrapping a
-      # Dials.set). The facade uses this to keep uncommitted dial state out
-      # of the shared cache.
+      # transaction (typically an application transaction wrapping a dial
+      # write). The facade uses this to keep uncommitted dial state out of
+      # the shared cache.
       def transaction_open?
-        pool = Setting.connection_pool
+        pool = Override.connection_pool
         return false unless pool.active_connection?
 
         connection = pool.respond_to?(:lease_connection) ? pool.lease_connection : pool.connection
@@ -88,61 +99,19 @@ module Dials
       end
 
       def set_global(key, value, actor, expected_version: nil)
-        transaction_with_retry do
-          assert_version!(expected_version)
-          setting = Setting.find_or_initialize_by(key: key.to_s)
-          old = setting.value.nil? ? nil : decode(setting.value)
-          setting.update!(value: encode(value))
-          record(key, nil, "set", old, value, actor)
-          old
-        end
+        write(expected_version) { set_override(key, Scope::GLOBAL, nil, value, actor) }
       end
 
       def clear_global(key, actor, expected_version: nil)
-        transaction_with_retry do
-          assert_version!(expected_version)
-          setting = Setting.find_by(key: key.to_s)
-          next false if setting.nil? || setting.value.nil?
-
-          old = decode(setting.value)
-          if setting.variations.exists?
-            setting.update!(value: nil)
-          else
-            setting.destroy!
-          end
-          record(key, nil, "clear", old, nil, actor)
-          true
-        end
+        write(expected_version) { clear_override(key, Scope::GLOBAL, nil, actor) }
       end
 
       def set_variation(key, canonical_scope, value, actor, expected_version: nil)
-        transaction_with_retry do
-          assert_version!(expected_version)
-          setting = Setting.find_or_create_by!(key: key.to_s)
-          variation = setting.variations.find_or_initialize_by(scope: canonical_scope)
-          old = variation.persisted? ? decode(variation.value) : nil
-          variation.update!(value: encode(value))
-          record(key, canonical_scope, "set", old, value, actor)
-          old
-        end
+        write(expected_version) { set_override(key, canonical_scope, canonical_scope, value, actor) }
       end
 
       def clear_variation(key, canonical_scope, actor, expected_version: nil)
-        transaction_with_retry do
-          assert_version!(expected_version)
-          setting = Setting.find_by(key: key.to_s)
-          variation = setting&.variations&.find_by(scope: canonical_scope)
-          next false if variation.nil?
-
-          old = decode(variation.value)
-          variation.destroy!
-          # A parent holding neither a global override nor any variation is
-          # meaningless; remove it so "no overrides" and "no rows" stay
-          # synonyms.
-          setting.destroy! if setting.value.nil? && !setting.variations.exists?
-          record(key, canonical_scope, "clear", old, nil, actor)
-          true
-        end
+        write(expected_version) { clear_override(key, canonical_scope, canonical_scope, actor) }
       end
 
       def changes(key: nil, limit: 50)
@@ -171,19 +140,53 @@ module Dials
 
       private
 
-      # The compare half of compare-and-swap, atomic with the write: it runs
-      # INSIDE the write's transaction, and every version-checked writer
-      # first takes a row lock on the single dial_locks anchor row — so of
-      # two concurrent writes carrying the same expected version, exactly one
-      # commits; the other blocks on the lock, then re-reads a version that
-      # has moved, and raises. StaleWrite is deliberately not in RETRYABLE:
-      # a retried CAS would recompute against the new version and succeed,
-      # silently defeating the mechanism. On raise the transaction rolls
-      # back — nothing applied, nothing logged.
+      # Every mutation: one transaction, the anchor lock, the optional
+      # version comparison, then the block. Locking BEFORE comparing is what
+      # makes CAS atomic with the write: a concurrent writer (CAS or not)
+      # either committed before we took the lock — so the comparison sees its
+      # change — or blocks until we commit.
+      def write(expected_version)
+        transaction_with_retry do
+          lock_anchor!
+          assert_version!(expected_version)
+          yield
+        end
+      end
+
+      # The stored override's scope is always a canonical string (the global
+      # is Scope::GLOBAL); the change log's scope stays nil for globals
+      # (history's stable encoding), which is why both travel separately.
+      def set_override(key, stored_scope, logged_scope, value, actor)
+        override = Override.find_or_initialize_by(key: key.to_s, scope: stored_scope)
+        old = override.persisted? ? decode(override.value) : nil
+        override.update!(value: encode(value))
+        record(key, logged_scope, "set", old, value, actor)
+        old
+      end
+
+      # Clearing removes the row — "no override" and "no row" are synonyms
+      # at every layer, with no anchor rows to garbage-collect. Clearing what
+      # is not there is a no-op and logs nothing (but the version comparison,
+      # if requested, already ran: a stale no-op is still stale).
+      # Named for the action, not the boolean (it mirrors the public clear,
+      # whose return is "did an override exist").
+      def clear_override(key, stored_scope, logged_scope, actor) # rubocop:disable Naming/PredicateMethod
+        override = Override.find_by(key: key.to_s, scope: stored_scope)
+        return false if override.nil?
+
+        old = decode(override.value)
+        override.destroy!
+        record(key, logged_scope, "clear", old, nil, actor)
+        true
+      end
+
+      # The compare half of compare-and-swap. Runs after the anchor lock, so
+      # of two concurrent writes carrying the same expected version, exactly
+      # one commits; the other blocks on the lock, then re-reads a version
+      # that has moved, and raises StaleWrite — transaction rolled back,
+      # nothing applied, nothing logged.
       def assert_version!(expected)
         return if expected.nil?
-
-        lock_anchor!
         return if expected == StoreVersion.token(version)
 
         raise StaleWrite,
@@ -221,7 +224,7 @@ module Dials
       def transaction_with_retry(&)
         attempts = 0
         begin
-          Setting.transaction(&)
+          Override.transaction(&)
         rescue *RETRYABLE
           attempts += 1
           retry if attempts == 1 && !transaction_open?
@@ -257,19 +260,21 @@ module Dials
         SKIP
       end
 
+      # For non-global rows only — the global's "{}" was matched before this
+      # runs, so an empty object here is corrupt (likely a hand-written row).
       def valid_scope_string?(key, scope)
         parsed = JSON.parse(scope)
         return true if parsed.is_a?(Hash) && !parsed.empty?
 
-        quarantine("dial_variations(#{key})", "scope #{scope.inspect} is not a non-empty JSON object")
+        quarantine("dials(#{key})", "scope #{scope.inspect} is not a non-empty JSON object")
         false
       rescue JSON::ParserError
-        quarantine("dial_variations(#{key})", "scope #{scope.inspect} is not valid JSON")
+        quarantine("dials(#{key})", "scope #{scope.inspect} is not valid JSON")
         false
       end
 
       def quarantine(where, reason)
-        warn "[dials] skipping corrupt row in #{where}: #{reason} (fix or delete the row; it was not written through Dials.set)"
+        warn "[dials] skipping corrupt row in #{where}: #{reason} (fix or delete the row; it was not written through the Dials API)"
         nil
       end
     end

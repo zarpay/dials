@@ -26,33 +26,51 @@ from "overridden", and clearing an override is a delete, not a guess at what
 the default used to be. Full argument in
 [The Dial Model](/concepts/the-dial-model).
 
-## Two tables, real foreign key, no sentinels
+## One table of overrides — a reversed decision, recorded honestly
 
-Per-scope values are rows in `dial_variations` with a `NOT NULL` FK to
-`dials`, unique on `(dial_id, scope)`. This shape won over two alternatives
-that were each tried or seriously examined in the original system:
+Storage is one table: every override is a row keyed by `(key, scope)`, where
+the global override is the override at the **empty scope**, stored as its
+canonical encoding `"{}"`. `value` is NOT NULL — "no override" is "no row",
+at every layer.
 
-- **A scope column on one table with a sentinel row** (`'XX'` = global). The
-  original design's first draft. Rows related only by a shared key string
-  are the weak form of the idea: "no variation without a global" is
-  unenforceable, every reader must know the sentinel, and the sentinel
-  leaks into validation ("XX is not a country, except here").
-- **Self-referential `parent_id`.** Carries the FK but poisons every reader:
-  any query that doesn't filter children can serve one scope's value
-  globally. In the originating system, a cache that did
-  `pluck(:key, :value).to_h` would have collapsed duplicate keys and served
-  one country's value to the world — the redesign made that shape
-  *inexpressible* rather than merely guarded.
+An earlier iteration of this gem used two tables (a parent `dials` row per
+key, `dial_variations` hanging off a `NOT NULL` FK), inheriting the shape
+from the originating system, where it was the **right** choice: that app had
+many pieces of code querying the tables directly, and the two-table shape
+made "serve one country's value to the world" inexpressible for every
+present and future reader (a `parent_id` single table had nearly shipped
+exactly that bug via a careless `pluck(:key, :value).to_h`). It also
+rejected an `'XX'` sentinel row — a lie inside the dimension's value space
+that every reader had to know.
 
-With the separate table, the parent **is** the global, so reading the parent
-table stays safe by construction.
+Both of those arguments quietly lost their force in the gem, and an
+adversarial review (Claude proposing, Codex attacking) confirmed it from the
+code:
 
-One nullable column carries the model's only subtlety: `dials.value` is NULL
-when variations exist but no global override does (the row is then just the
-FK anchor). `NULL` = "no override" and JSON `false` = "false" are distinct by
-construction, which is what makes kill switches turn-off-able — a lesson
-the originating system learned when a `presence: true` validation nearly
-shipped an un-clearable kill switch.
+- **There is exactly one reader and one writer — the store.** Every other
+  access goes through the in-process snapshot. A shape that exists to
+  protect many direct readers protects readers that cannot exist here.
+- **`"{}"` is not a sentinel.** It is `Scope.canonical({})` — the truthful
+  canonical encoding of a real value in the scope algebra. The `'XX'`
+  objection does not transfer.
+- **The FK invariant enforced less than it advertised.** It guaranteed a
+  variation had a parent *row*, not a parent *override* (variations
+  legitimately outlive a cleared global) — a mechanical anchor whose
+  lifecycle (create-on-first-variation, destroy-with-last-override, the
+  `InvalidForeignKey` retry case) was pure bookkeeping cost.
+- **The nullable `dials.value` was the model's one standing subtlety.**
+  Unified, `value` is NOT NULL by schema, so NULL-vs-false can no longer be
+  confused anywhere — stronger than the validation-layer guard it replaces.
+- **The planned partial-scopes future lands on this shape.** Under
+  "most-specific scope wins", the global is literally the empty partial
+  scope; the unified table makes storage match the resolution model exactly.
+
+Two cautions the review attached, kept deliberately visible: uniqueness on
+`(key, scope)` is textual under the column collation (canonical encoding
+makes gem writes safe; MySQL's case-insensitive defaults mean dimension
+options shouldn't differ only by case), and the composite index carries
+explicit column limits (key 100, scope 255) to stay inside every supported
+database's index budget.
 
 ## The change log is a table the gem owns, and it is also the clock
 
@@ -190,13 +208,19 @@ one sentence ("the page you acted on is stale — re-read"), and the coherent
 per-row versioning is finer-grained and remains possible later without
 changing the token's opacity — callers never parse it.
 
-Two implementation commitments worth recording: the comparison is atomic
-with the write (inside the store transaction, serialized across processes by
-a `SELECT ... FOR UPDATE` on the single `dial_locks` anchor row — portable
-where advisory locks are not), and `StaleWrite` is deliberately excluded
-from the store's transient-error retry loop, because a retried CAS would
-recompute against the new version and succeed, silently defeating the
-mechanism.
+Two implementation commitments worth recording. First, **every** write —
+CAS or not — takes `SELECT ... FOR UPDATE` on the single `dial_locks` anchor
+row inside its transaction (portable where advisory locks are not; SQLite
+gets the same guarantee from its single-writer model). Serializing all
+writes is what makes the comparison atomic against every concurrent gem
+write, not just other CAS writes — the original CAS-writers-only locking had
+a hole an adversarial review caught: an unconditional write could commit
+inside a CAS writer's check-to-commit window. It also gives the change log's
+old/new values a true total order. Operators turn dials at human rates; the
+serialization costs nothing that matters. Second, `StaleWrite` is
+deliberately excluded from the store's transient-error retry loop, because a
+retried CAS would recompute against the new version and succeed, silently
+defeating the mechanism.
 
 ## Validation happens at write time, not read time
 

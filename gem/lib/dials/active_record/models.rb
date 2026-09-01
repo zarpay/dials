@@ -9,45 +9,37 @@ module Dials
     # surface.
     #
     # These models are internal plumbing for Stores::ActiveRecordStore.
-    # Application code reads and writes through Dials.get / Dials.set /
-    # Dials.clear, which is where validation, attribution, and cache busting
-    # live. Writing to these models directly bypasses all three.
+    # Application code reads and writes through the Dials facade, which is
+    # where validation, attribution, locking, and cache busting live.
+    # Writing to these models directly bypasses all of it.
 
-    # A dial's stored global override. A row exists once anything about the
-    # dial has been overridden; `value` NULL means "no global override —
-    # inherit the code default" (needed because variations hang off this row
-    # by foreign key and must survive a cleared global).
-    class Setting < ::ActiveRecord::Base
+    # One stored override — the `dials` table holds nothing else. A global
+    # override is simply the override at the empty scope, stored under the
+    # canonical encoding "{}"; a variation is the override at a non-empty
+    # canonical scope. `value` is NOT NULL: "no override" is "no row", at
+    # every layer — no anchor rows, no NULL-vs-false ambiguity to guard.
+    # Identity is the natural key (key, scope), unique.
+    #
+    # NOTE: uniqueness is textual, under the column's collation. Scope
+    # strings are canonical (sorted keys, string values) so gem writes can
+    # never collide cosmetically; on MySQL, a case-insensitive default
+    # collation additionally treats scopes differing only by case ("KE" vs
+    # "ke") as one row — don't declare dimension options that differ only by
+    # case, or give the table a binary collation.
+    class Override < ::ActiveRecord::Base
       self.table_name = "dials"
 
-      has_many :variations,
-               class_name: "Dials::ActiveRecord::Variation",
-               foreign_key: "dial_id",
-               inverse_of: :setting,
-               dependent: :delete_all
-
-      validates :key, presence: true, uniqueness: true
-    end
-
-    # A per-scope override. The NOT NULL foreign key is the invariant carried
-    # over from the pattern's origin: no variation without a parent row, no
-    # sentinel scopes, ever.
-    class Variation < ::ActiveRecord::Base
-      self.table_name = "dial_variations"
-
-      belongs_to :setting,
-                 class_name: "Dials::ActiveRecord::Setting",
-                 foreign_key: "dial_id",
-                 inverse_of: :variations
-
-      validates :scope, presence: true, uniqueness: { scope: :dial_id }
+      validates :key, :scope, presence: true
+      validates :scope, uniqueness: { scope: :key }
       validates :value, presence: { message: "cannot be SQL NULL" }, unless: -> { value == "false" }
     end
 
-    # A single-row anchor for compare-and-swap writes. A write carrying
-    # expected_version: takes SELECT ... FOR UPDATE on this row inside its
-    # transaction, serializing the version comparison with the change-log
-    # append across processes. One row, no data — it exists to be locked.
+    # A single-row anchor EVERY write locks (SELECT ... FOR UPDATE) inside
+    # its transaction. Serializing all gem writes across processes is what
+    # makes expected_version: compare-and-swap sound against every concurrent
+    # gem write (not just other CAS writes) and gives the change log a true
+    # total order; operator write rates make the serialization cost
+    # irrelevant. One row, no data — it exists to be locked.
     class Lock < ::ActiveRecord::Base
       self.table_name = "dial_locks"
 
@@ -57,6 +49,8 @@ module Dials
     # Append-only attribution log; also the store's version counter (its max
     # id moves on every write, which is what the cache staleness probe
     # watches). Never given an updated_at — rows are facts, not state.
+    # `scope` here stays NULL for global changes — history keeps one stable
+    # encoding for readers regardless of how storage spells the empty scope.
     class Change < ::ActiveRecord::Base
       self.table_name = "dial_changes"
 

@@ -190,9 +190,10 @@ Every write path (generated and primitive) accepts `expected_version:`,
 which makes the write **compare-and-swap**: pass the token your page
 rendered at (from `Dials.overview`) and the write is refused with
 `Dials::StaleWrite` — unapplied, with nothing appended to the change log —
-if the store has moved since. Of two concurrent writes carrying the same
-token, exactly one commits; the comparison is atomic with the write inside
-the store's transaction, never a pre-check.
+if the store has moved since. The comparison is atomic with the write:
+every dial write (CAS or not) serializes on a single lock inside the
+store's transaction, so a CAS write cannot interleave with ANY concurrent
+gem write — of two writes carrying the same token, exactly one commits.
 
 ```ruby
 overview = Dials.overview

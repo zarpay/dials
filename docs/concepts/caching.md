@@ -8,7 +8,7 @@ immediately, and all processes converge within a bounded interval.
 ## The snapshot
 
 Each process holds one immutable **Snapshot**: every stored global override
-and every variation, loaded in two queries, deep-frozen. A read
+and every variation, loaded in one query (plus one for the version), deep-frozen. A read
 (`Dials.use_checkout_fee_bps(market: "KE")`) is a registry lookup plus a
 hash lookup into the snapshot. The demo app pins this
 with a spec that runs 100 reads under a SQL subscriber and asserts **zero

@@ -12,10 +12,12 @@ bin/rails db:migrate
 
 The generator creates:
 
-- **One migration** for the three gem-owned tables — `dials`,
-  `dial_variations`, `dial_changes`. All value columns are JSON **text**
-  (portable across PostgreSQL, MySQL, and SQLite; nothing ever queries inside
-  a value, so jsonb buys nothing — see [Caching](/concepts/caching)).
+- **One migration** for the three gem-owned tables — `dials` (one row per
+  stored override; a global is the override at the empty scope), `dial_changes`
+  (attributed history and version counter), `dial_locks` (the single-row
+  write-serialization anchor). All value columns are JSON **text** (portable
+  across PostgreSQL, MySQL, and SQLite; nothing ever queries inside a value,
+  so jsonb buys nothing — see [Caching](/concepts/caching)).
 - **`config/initializers/dials.rb`** with a commented starter registry.
 
 ## 2. Configure and declare

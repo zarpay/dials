@@ -9,7 +9,7 @@ RSpec.describe "Dial resolution", type: :model do
 
   it "serves the code default when nothing is stored" do
     expect(Dials.use_checkout_fee_bps(market: "KE")).to eq(250)
-    expect(Dials::ActiveRecord::Setting.count).to eq(0)
+    expect(Dials::ActiveRecord::Override.count).to eq(0)
   end
 
   it "layers global override and variation, and clears back down layer by layer" do
