@@ -17,10 +17,16 @@ require_relative "dials/version"
 #          unit: "bps", variants: { market: %w[KE NG BD] }
 #   end
 #
-#   Dials.checkout_fee_bps                        # => the Dial
-#   Dials.checkout_fee_bps.for(market: "KE")      # => 250
-#   Dials.checkout_fee_bps.set(120, market: "BD", actor: ops)
-#   Dials.checkout_fee_bps.for(market: "BD")      # => 120
+#   Dials.checkout_fee_bps                   # => 250
+#   Dials.checkout_fee_bps(market: "KE")     # => 250
+#   Dials.adjust(:checkout_fee_bps, 120, market: "BD", actor: ops)
+#   Dials.checkout_fee_bps(market: "BD")     # => 120
+#
+# Declaring a dial generates one method, and it returns the value — never an
+# object wrapping it. That is deliberate: an object standing in for a boolean
+# is truthy even when the boolean is false, so a kill switch you had turned
+# off would read as on. The declaration itself is reachable, but only by
+# asking for it: Dials[:checkout_fee_bps].
 module Dials
   class Error < StandardError; end
 
@@ -45,8 +51,8 @@ require_relative "dials/record"
 
 module Dials
   # Per-dial reader methods (`Dials.checkout_fee_bps`) are defined here rather
-  # than on Dials itself, so `reset!` can strip every one of them without going
-  # anywhere near the real API.
+  # than on Dials itself, so `undefine_all!` can strip every one of them without
+  # going anywhere near the real API.
   module Readers; end
   extend Readers
 
@@ -89,8 +95,9 @@ module Dials
     # accumulate, so an app can split them up by domain.
     def define(&) = DSL.new.instance_eval(&)
 
-    # Look a dial up by key — for code handed the key at runtime, like an admin
-    # screen iterating the catalog.
+    # The dial itself — its default, type, variants, overrides and history.
+    # Deliberately explicit: application code reads values through the
+    # generated methods and never needs one of these.
     def [](key)
       registry.fetch(key.to_sym) do
         raise UnknownDial, "no dial named #{key.inspect} (declared: #{registry.keys.join(', ')})"
@@ -106,7 +113,9 @@ module Dials
       raise InvalidDial, "dial #{dial.key} is already declared" if registry.key?(dial.key)
       raise InvalidDial, "dial #{dial.key} would define Dials.#{dial.key}, which already exists" if respond_to?(dial.key, true)
 
-      Readers.define_method(dial.key) { dial }
+      # The generated method resolves and returns the value. Nothing in the
+      # ergonomic path ever hands out the Dial.
+      Readers.define_method(dial.key) { |**scope| dial.for(**scope) }
       registry[dial.key] = dial
     end
 
@@ -147,7 +156,23 @@ module Dials
 
     # -- writing -------------------------------------------------------------
 
-    # Not public API; Dial#set and Dial#clear call it.
+    # Turn a dial. With no scope this moves the global value; with one it moves
+    # the value for exactly those dimensions. `actor:` is required and lands in
+    # the change log.
+    #
+    #   Dials.adjust(:checkout_fee_bps, 120, market: "BD", actor: current_admin)
+    #
+    # Writes name the key rather than going through a generated method, because
+    # the surfaces that write — an admin form, a console, a circuit breaker —
+    # are holding a key already, and because a write is worth spelling out.
+    def adjust(key, value, actor:, **scope) = self[key].adjust(value, actor: actor, **scope)
+
+    # Drop an override, returning resolution to the layer below: a reset variant
+    # falls back to the global, a reset global to the code default. Returns
+    # false — and writes nothing — when there was nothing to reset.
+    def reset(key, actor:, **scope) = self[key].reset(actor: actor, **scope)
+
+    # Not public API; Dial#adjust and Dial#reset call it.
     def append(key, scope, value, actor)
       raise Error, "every write needs an actor: (who is turning this dial?)" if actor.nil?
 
@@ -192,7 +217,7 @@ module Dials
     def stubs = Thread.current[STUBS]
 
     # Test hook: forget every declaration and its generated reader.
-    def reset!
+    def undefine_all!
       Readers.instance_methods(false).each { |name| Readers.send(:remove_method, name) }
       registry.clear
       reload!

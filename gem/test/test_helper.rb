@@ -27,7 +27,7 @@ class DialsTest < Minitest::Test
   OPS = Operator.new(7, "ops@example.com")
 
   def setup
-    Dials.reset!
+    Dials.undefine_all!
     Dials::Record.delete_all
     Dials.actor_label = nil
     # Tests want every write visible at once, with no waiting on a probe.

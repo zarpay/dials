@@ -3,13 +3,33 @@
 require "test_helper"
 
 class DeclaringTest < DialsTest
-  def test_a_declared_dial_is_reachable_by_name_and_by_key
+  def test_the_generated_reader_returns_the_value_and_never_an_object
     declare_fee_and_switch
 
-    assert_kind_of Dials::Dial, Dials.checkout_fee_bps
-    assert_same Dials.checkout_fee_bps, Dials[:checkout_fee_bps]
-    assert_same Dials.checkout_fee_bps, Dials["checkout_fee_bps"]
-    assert_equal :checkout_fee_bps, Dials.checkout_fee_bps.key
+    assert_equal 250, Dials.checkout_fee_bps
+    assert_instance_of Integer, Dials.checkout_fee_bps(market: "KE")
+    assert_instance_of TrueClass, Dials.signups_enabled
+  end
+
+  def test_a_kill_switch_that_is_off_is_falsy_at_the_call_site
+    declare_fee_and_switch
+    Dials.adjust(:signups_enabled, false, actor: OPS)
+
+    # The reason readers return primitives: any object standing in for `false`
+    # would be truthy here, and a kill switch you had turned off would read as
+    # on. There is no way to make a non-primitive falsy in Ruby, so the only
+    # fix is not to hand one out.
+    refute Dials.signups_enabled
+    assert_instance_of FalseClass, Dials.signups_enabled
+  end
+
+  def test_the_dial_itself_is_reachable_but_only_by_asking_for_it
+    declare_fee_and_switch
+
+    assert_kind_of Dials::Dial, Dials[:checkout_fee_bps]
+    assert_same Dials[:checkout_fee_bps], Dials["checkout_fee_bps"]
+    assert_equal :checkout_fee_bps, Dials[:checkout_fee_bps].key
+    assert_equal 250, Dials[:checkout_fee_bps].default
   end
 
   def test_the_catalog_lists_every_dial
@@ -28,14 +48,14 @@ class DeclaringTest < DialsTest
 
   def test_a_dial_carries_its_presentation_metadata
     declare_fee_and_switch
-    fee = Dials.checkout_fee_bps
+    fee = Dials[:checkout_fee_bps]
 
     assert_equal "Checkout fee bps", fee.label
     assert_equal "bps", fee.unit
     assert_equal "Fee charged at checkout.", fee.description
     assert_equal %i[market], fee.variants.keys
     assert_predicate fee, :variants?
-    refute_predicate Dials.signups_enabled, :variants?
+    refute_predicate Dials[:signups_enabled], :variants?
   end
 
   def test_asking_for_a_dial_that_does_not_exist_says_what_does
@@ -54,7 +74,7 @@ class DeclaringTest < DialsTest
   end
 
   def test_a_key_that_would_shadow_the_api_raises
-    error = assert_raises(Dials::InvalidDial) { Dials.define { dial :reload!, default: 1, type: Integer } }
+    error = assert_raises(Dials::InvalidDial) { Dials.define { dial :adjust, default: 1, type: Integer } }
     assert_match(/already exists/, error.message)
   end
 
@@ -82,23 +102,23 @@ class DeclaringTest < DialsTest
       dial :blob,    default: { "a" => [1, 2] }, type: _JSONData
     end
 
-    assert_equal 1, Dials.plain.value
-    assert_equal({ "a" => [1, 2] }, Dials.blob.value)
-    assert_raises(Dials::InvalidValue) { Dials.enumed.set("medium", actor: OPS) }
-    assert_raises(Dials::InvalidValue) { Dials.literal.set("ABC", actor: OPS) }
-    assert_raises(Dials::InvalidValue) { Dials.ranged.set(11, actor: OPS) }
+    assert_equal 1, Dials.plain
+    assert_equal({ "a" => [1, 2] }, Dials.blob)
+    assert_raises(Dials::InvalidValue) { Dials.adjust(:enumed, "medium", actor: OPS) }
+    assert_raises(Dials::InvalidValue) { Dials.adjust(:literal, "ABC", actor: OPS) }
+    assert_raises(Dials::InvalidValue) { Dials.adjust(:ranged, 11, actor: OPS) }
   end
 
   def test_a_dial_inspects_readably
     declare_fee_and_switch
 
     assert_equal "#<Dials::Dial checkout_fee_bps default=250 type=_Constraint(Integer, 1..10000) variants=[:market]>",
-                 Dials.checkout_fee_bps.inspect
+                 Dials[:checkout_fee_bps].inspect
   end
 
   def test_the_default_is_frozen_so_one_caller_cannot_corrupt_every_other
     Dials.define { dial :blob, default: { "a" => [1] }, type: _JSONData }
 
-    assert_raises(FrozenError) { Dials.blob.value["a"] << 2 }
+    assert_raises(FrozenError) { Dials.blob["a"] << 2 }
   end
 end

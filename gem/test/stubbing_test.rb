@@ -7,23 +7,23 @@ class StubbingTest < DialsTest
     declare_fee_and_switch
 
     Dials.stub(checkout_fee_bps: 999) do
-      assert_equal 999, Dials.checkout_fee_bps.for(market: "KE")
-      assert_equal 999, Dials.checkout_fee_bps.for(market: "BD")
-      assert_equal 999, Dials.checkout_fee_bps.for
+      assert_equal 999, Dials.checkout_fee_bps(market: "KE")
+      assert_equal 999, Dials.checkout_fee_bps(market: "BD")
+      assert_equal 999, Dials.checkout_fee_bps
     end
 
-    assert_equal 250, Dials.checkout_fee_bps.for(market: "KE")
+    assert_equal 250, Dials.checkout_fee_bps(market: "KE")
   end
 
   def test_a_stub_beats_a_stored_override_without_touching_it
     declare_fee_and_switch
-    Dials.checkout_fee_bps.set(120, market: "BD", actor: OPS)
+    Dials.adjust(:checkout_fee_bps, 120, market: "BD", actor: OPS)
 
     Dials.stub(checkout_fee_bps: 999) do
-      assert_equal 999, Dials.checkout_fee_bps.for(market: "BD")
+      assert_equal 999, Dials.checkout_fee_bps(market: "BD")
     end
 
-    assert_equal 120, Dials.checkout_fee_bps.for(market: "BD")
+    assert_equal 120, Dials.checkout_fee_bps(market: "BD")
     assert_equal 1, Dials::Record.count
   end
 
@@ -32,17 +32,17 @@ class StubbingTest < DialsTest
 
     Dials.stub(checkout_fee_bps: 111) do
       Dials.stub(signups_enabled: false) do
-        assert_equal 111, Dials.checkout_fee_bps.for(market: "KE")
-        assert_equal false, Dials.signups_enabled.value
+        assert_equal 111, Dials.checkout_fee_bps(market: "KE")
+        assert_equal false, Dials.signups_enabled
 
         Dials.stub(checkout_fee_bps: 222) do
-          assert_equal 222, Dials.checkout_fee_bps.for(market: "KE")
+          assert_equal 222, Dials.checkout_fee_bps(market: "KE")
         end
 
-        assert_equal 111, Dials.checkout_fee_bps.for(market: "KE")
+        assert_equal 111, Dials.checkout_fee_bps(market: "KE")
       end
 
-      assert_equal true, Dials.signups_enabled.value
+      assert_equal true, Dials.signups_enabled
     end
   end
 
@@ -57,15 +57,15 @@ class StubbingTest < DialsTest
     declare_fee_and_switch
 
     assert_raises(RuntimeError) { Dials.stub(checkout_fee_bps: 999) { raise "boom" } }
-    assert_equal 250, Dials.checkout_fee_bps.for(market: "KE")
+    assert_equal 250, Dials.checkout_fee_bps(market: "KE")
   end
 
   def test_a_stub_cannot_hide_a_scope_bug
     declare_fee_and_switch
 
     Dials.stub(checkout_fee_bps: 999) do
-      assert_raises(Dials::InvalidScope) { Dials.checkout_fee_bps.for(market: "ZA") }
-      assert_raises(Dials::InvalidScope) { Dials.checkout_fee_bps.for(platform: "ios") }
+      assert_raises(Dials::InvalidScope) { Dials.checkout_fee_bps(market: "ZA") }
+      assert_raises(Dials::InvalidScope) { Dials.checkout_fee_bps(platform: "ios") }
     end
   end
 end

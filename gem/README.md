@@ -2,9 +2,9 @@
 
 Constants you can turn without a deploy.
 
-A dial is declared in code with a default and a type. Operators override it at
-runtime; the override lives in **one append-only table**, is served from a
-per-process cache, and carries the actor who made it. The declaration stays in
+A dial is declared in code with a default and a type. Operators turn it at
+runtime; the new value lives in **one append-only table**, is served from a
+per-process cache, and carries the actor who turned it. The declaration stays in
 code review, where it belongs — the database only ever stores values.
 
 ```ruby
@@ -13,11 +13,19 @@ Dials.define do
        unit: "bps", variants: { market: %w[KE NG BD] }
 end
 
-Dials.checkout_fee_bps                            # => #<Dials::Dial checkout_fee_bps ...>
-Dials.checkout_fee_bps.for(market: "KE")          # => 250
-Dials.checkout_fee_bps.set(120, market: "BD", actor: admin)
-Dials.checkout_fee_bps.for(market: "BD")          # => 120
+Dials.checkout_fee_bps                       # => 250
+Dials.checkout_fee_bps(market: "KE")         # => 250
+Dials.adjust(:checkout_fee_bps, 120, market: "BD", actor: admin)
+Dials.checkout_fee_bps(market: "BD")         # => 120
 ```
+
+**A dial reads as a primitive, always.** Declaring a dial generates one method
+and it returns the value — never an object wrapping it. That is not a
+convenience; it is the difference between a working kill switch and a broken
+one. Any object standing in for `false` is truthy, so `if Dials.signups_enabled`
+would run the guarded code with the switch turned off, silently and forever.
+Ruby has no way to make a non-primitive falsy, so the only fix is not to hand
+one out.
 
 ## Install
 
@@ -75,11 +83,9 @@ change as the code that reads the varied value.
 ## Reading
 
 ```ruby
-Dials.checkout_fee_bps.for(market: "KE")   # scoped read
-Dials.signups_enabled.value                # global read
-
-Dials[:checkout_fee_bps].for(market: "KE") # by key, for code handed one at runtime
-Dials.all                                  # the whole catalog, for an admin screen
+Dials.checkout_fee_bps(market: "KE")   # => 250
+Dials.checkout_fee_bps                 # => 250   the global value
+Dials.signups_enabled                  # => true  a real boolean
 ```
 
 Every stored scope the request satisfies is a candidate; **the most specific one
@@ -88,13 +94,13 @@ override is not a special case — it is simply the candidate that names no
 dimensions, so it matches everything and loses to anything more specific.
 
 ```ruby
-Dials.fee.set(300, actor: ops)                            # everywhere
-Dials.fee.set(200, market: "BD", actor: ops)              # all of BD
-Dials.fee.set(100, market: "BD", platform: "ios", actor: ops)
+Dials.adjust(:fee, 300, actor: ops)                            # everywhere
+Dials.adjust(:fee, 200, market: "BD", actor: ops)              # all of BD
+Dials.adjust(:fee, 100, market: "BD", platform: "ios", actor: ops)
 
-Dials.fee.for(market: "BD", platform: "ios")     # => 100
-Dials.fee.for(market: "BD", platform: "android") # => 200
-Dials.fee.for(market: "KE", platform: "ios")     # => 300
+Dials.fee(market: "BD", platform: "ios")     # => 100
+Dials.fee(market: "BD", platform: "android") # => 200
+Dials.fee(market: "KE", platform: "ios")     # => 300
 ```
 
 A scope naming a dimension the dial does not declare, or a value that dimension
@@ -103,32 +109,48 @@ does not allow, raises rather than quietly falling through to the global.
 ## Writing
 
 ```ruby
-Dials.checkout_fee_bps.set(120, market: "BD", actor: current_admin)  # => 120
-Dials.checkout_fee_bps.clear(market: "BD", actor: current_admin)     # => true
+Dials.adjust(:checkout_fee_bps, 120, market: "BD", actor: current_admin)  # => 120
+Dials.reset(:checkout_fee_bps, market: "BD", actor: current_admin)        # => true
 ```
+
+Writes name the key rather than going through a generated method. The surfaces
+that write — an admin form, a console, a circuit breaker — are holding a key
+already, and a write is worth spelling out.
 
 `actor:` is required on every write and lands in the change log. Pass a model
 (its class, id, and email/name are recorded) or a plain string for a script.
-Clearing returns resolution to the layer below: a cleared variant falls back to
-the global, a cleared global to the code default. Clearing what was never set
-writes nothing and returns `false`.
+Resetting returns resolution to the layer below: a reset variant falls back to
+the global, a reset global to the code default. Resetting what was never
+adjusted writes nothing and returns `false`.
 
 Values are validated on the way in, and are checked for surviving a JSON round
 trip — so a symbol key or a `Time` is refused at write time rather than read
 back as something else.
 
+## The catalog
+
+Admin screens need the declaration itself: a label to render, a type to build an
+input from, a default to compare against. That is what `Dials[:key]` is for, and
+typing it is the deliberate act that gets you an object.
+
 ```ruby
-Dials.checkout_fee_bps.cast(120)   # validate without writing, for a form
-Dials.checkout_fee_bps.overrides   # => { {} => 300, {market: "BD"} => 120 }
-Dials.checkout_fee_bps.history     # newest first, with actors
-Dials.history                      # every dial
+Dials[:checkout_fee_bps].label       # => "Checkout fee bps"
+Dials[:checkout_fee_bps].default     # => 250
+Dials[:checkout_fee_bps].type        # => _Constraint(Integer, 1..10000)
+Dials[:checkout_fee_bps].variants    # => { market: #<Set: {"KE", "NG", "BD"}> }
+Dials[:checkout_fee_bps].cast(120)   # validate a form input without writing it
+Dials[:checkout_fee_bps].overrides   # => { {} => 300, {market: "BD"} => 120 }
+Dials[:checkout_fee_bps].history     # newest first, with actors
+
+Dials.all                            # every dial, for the index page
+Dials.history                        # every change, across every dial
 ```
 
 ## The one table
 
-Every set and every clear **inserts** a row. Nothing is ever updated or deleted.
-The newest row for a `(key, scope)` pair is the current value, and a row with a
-NULL value is a tombstone meaning "cleared".
+Every adjustment and every reset **inserts** a row. Nothing is ever updated or
+deleted. The newest row for a `(key, scope)` pair is the current value, and a
+row with a NULL value is a tombstone meaning "no override here".
 
 | id | key | scope | value | actor_label |
 |---|---|---|---|---|
@@ -166,7 +188,7 @@ Dials.reload!                   # give up the cache now
 
 ```ruby
 Dials.stub(checkout_fee_bps: 999) do
-  Dials.checkout_fee_bps.for(market: "KE")  # => 999
+  Dials.checkout_fee_bps(market: "KE")  # => 999
 end
 ```
 

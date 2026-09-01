@@ -20,10 +20,13 @@ Dials.define do
        unit: "bps", variants: { market: %w[KE NG BD] }
 end
 
-Dials.checkout_fee_bps.for(market: "KE")          # => 250
-Dials.checkout_fee_bps.set(120, market: "BD", actor: admin)
-Dials.checkout_fee_bps.for(market: "BD")          # => 120
+Dials.checkout_fee_bps(market: "KE")         # => 250
+Dials.adjust(:checkout_fee_bps, 120, market: "BD", actor: admin)
+Dials.checkout_fee_bps(market: "BD")         # => 120
 ```
+
+A dial always reads as a primitive — the generated method returns the value, not
+an object wrapping it, so a kill switch that is off is falsy at the call site.
 
 ## Repository layout
 

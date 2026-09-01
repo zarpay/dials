@@ -4,16 +4,14 @@ require "json"
 require "literal"
 
 module Dials
-  # One declared dial: what it is, and everything you can do with it.
+  # One declared dial: what it is, and everything you can do with it. Declared
+  # once, in code, and frozen — the database stores values, never what a dial
+  # *is*.
   #
-  #   fee = Dials.checkout_fee_bps          # => #<Dials::Dial checkout_fee_bps ...>
-  #   fee.for(market: "KE")                 # => 250
-  #   fee.set(120, market: "BD", actor: ops) # => 120
-  #   fee.for(market: "BD")                 # => 120
-  #   fee.clear(market: "BD", actor: ops)   # => true
-  #
-  # A dial is declared once, in code, and frozen. The database stores values;
-  # it never stores what a dial *is*.
+  # Application code does not normally hold one of these. `Dials.checkout_fee_bps`
+  # returns the *value*; you reach the object deliberately, through
+  # `Dials[:checkout_fee_bps]`, when you want the declaration itself — an admin
+  # screen rendering the catalog, or a console poking at the history.
   class Dial
     attr_reader :key, :default, :type, :variants, :label, :unit, :description
 
@@ -63,19 +61,19 @@ module Dials
     # The global value, for dials that do not vary.
     def value = self.for
 
-    # Override the dial. With no scope this sets the global value; with one it
-    # sets the value for exactly those dimensions. `actor:` is required and
+    # Turn the dial. With no scope this moves the global value; with one it
+    # moves the value for exactly those dimensions. `actor:` is required and
     # lands in the change log.
-    def set(value, actor:, **scope)
+    def adjust(value, actor:, **scope)
       stored = cast(value)
       Dials.append(key, Scope.dump(check_scope!(scope)), stored, actor)
       stored
     end
 
-    # Remove an override, returning resolution to the layer below: a cleared
-    # variant falls back to the global, a cleared global to the code default.
-    # Returns false — and writes nothing — when there was nothing to clear.
-    def clear(actor:, **scope)
+    # Drop an override, returning resolution to the layer below: a reset
+    # variant falls back to the global, a reset global to the code default.
+    # Returns false — and writes nothing — when there was nothing to reset.
+    def reset(actor:, **scope)
       requested = check_scope!(scope)
       return false unless Dials.overrides[key]&.key?(requested)
 
@@ -86,15 +84,15 @@ module Dials
     # Every stored override for this dial: { scope(Hash) => value }.
     def overrides = Dials.overrides.fetch(key, {})
 
-    # This dial's change log, newest first — every set and clear ever made,
-    # with the actor who made it.
+    # This dial's change log, newest first — every adjustment and reset ever
+    # made, with the actor who made it.
     def history(limit: 50) = Record.where(key: key.to_s).order(id: :desc).limit(limit)
 
     # Validate a candidate value and return it in the form it would be stored
     # and read back as. Public because an admin form wants to ask "would this
     # be accepted?" without writing anything.
     def cast(value)
-      raise InvalidValue, "#{key}: value cannot be nil (clear the dial instead)" if value.nil?
+      raise InvalidValue, "#{key}: value cannot be nil (reset the dial instead)" if value.nil?
 
       Literal.check(value, type)
 

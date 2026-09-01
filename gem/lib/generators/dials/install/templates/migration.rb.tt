@@ -2,9 +2,10 @@
 
 class CreateDials < ActiveRecord::Migration[<%= ActiveRecord::Migration.current_version %>]
   def change
-    # One table, append-only. Every set and every clear inserts a row; nothing
-    # is ever updated or deleted. The newest row for a (key, scope) pair is the
-    # current value, and a NULL value is a tombstone meaning "cleared".
+    # One table, append-only. Every adjustment and every reset inserts a row;
+    # nothing is ever updated or deleted. The newest row for a (key, scope)
+    # pair is the current value, and a NULL value is a tombstone meaning
+    # "no override here".
     #
     # So this table is the change log and the state at the same time, and its
     # row count is the version counter each process watches to notice writes
