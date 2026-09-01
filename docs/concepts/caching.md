@@ -8,8 +8,9 @@ immediately, and all processes converge within a bounded interval.
 ## The snapshot
 
 Each process holds one immutable **Snapshot**: every stored global override
-and every variation, loaded in two queries, deep-frozen. `Dials.get` is a
-registry lookup plus a hash lookup into the snapshot. The demo app pins this
+and every variation, loaded in two queries, deep-frozen. A read
+(`Dials.use_checkout_fee_bps(market: "KE")`) is a registry lookup plus a
+hash lookup into the snapshot. The demo app pins this
 with a spec that runs 100 reads under a SQL subscriber and asserts **zero
 queries**.
 
@@ -19,9 +20,10 @@ what every other thread reads.
 
 ## Freshness: two mechanisms
 
-**1. Local writes bust immediately.** `Dials.set` / `Dials.clear` discard the
-process's snapshot on the way out. The admin who changed a value sees the
-change on the very next read, no matter what the probe interval is.
+**1. Local writes bust immediately.** Every write (`adjust_*`, `clear_*`, or
+the `set`/`clear` primitives) discards the process's snapshot on the way
+out. The admin who changed a value sees the change on the very next read, no
+matter what the probe interval is.
 
 **2. Other processes converge via the staleness probe.** A cache busted in
 one Puma worker says nothing to the other 30 workers on 4 machines. Instead
@@ -66,7 +68,7 @@ snapshot instead of stampeding the database.
 
 ## Writes inside application transactions
 
-If `Dials.set` runs inside one of your own database transactions, the
+If a dial write runs inside one of your own database transactions, the
 uncommitted value must not leak into the shared cache (other threads would
 read it; a rollback would leave it behind). The gem handles this: the
 writing thread reads its own uncommitted state through fresh, unpublished

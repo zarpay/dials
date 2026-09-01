@@ -19,14 +19,19 @@ end
 # Declare your dials. A dial with no `variants:` is global-only by
 # construction. Declaring `variants:` is the arming gate — add it in the same
 # change as the code that reads the varied value.
+#
+# Each declaration generates the dial's methods, e.g. for :merchant_fee_bps:
+#   Dials.use_merchant_fee_bps(market: "KE")
+#   Dials.adjust_merchant_fee_bps(90, actor: current_admin, market: "KE")
+#   Dials.clear_merchant_fee_bps(actor: current_admin, market: "KE")
 Dials.define do
-  # dial :merchant_fee_bps, 100,
+  # dial :merchant_fee_bps, default: 100,
   #      type: :integer,
   #      bounds: 1..10_000,
   #      unit: "bps",
   #      description: "Fee charged to merchants, in basis points.",
   #      variants: { market: { options: %w[KE NG BD] } }
 
-  # dial :signups_enabled, true, type: :boolean,
+  # dial :signups_enabled, default: true, type: :boolean,
   #      description: "Global kill switch for new signups."
 end

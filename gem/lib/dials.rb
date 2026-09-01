@@ -4,6 +4,7 @@ require "json"
 
 require_relative "dials/version"
 require_relative "dials/errors"
+require_relative "dials/generated"
 require_relative "dials/freeze"
 require_relative "dials/dimension"
 require_relative "dials/definition"
@@ -28,6 +29,16 @@ require_relative "dials/testing"
 #
 # Declarations live in code (Dials.define); values live in a store; reads
 # come from a per-process cache. Every write is attributed and logged.
+#
+# Declaring a dial generates its methods (see Generated):
+#
+#   Dials.use_base_fee(market: "KE")                  # read
+#   Dials.adjust_base_fee(25, actor: ops, market: "KE") # write
+#   Dials.clear_base_fee(actor: ops, market: "KE")      # remove an override
+#
+# The key-taking primitives (get, set, clear) stay public underneath — they
+# are the dynamic-access layer for code that receives the key at runtime
+# (an admin surface iterating the registry, a console one-liner).
 module Dials
   # Thread-local marker: this thread performed a dial write inside a
   # database transaction that is still open. While set, the thread's reads
@@ -46,10 +57,13 @@ module Dials
     # Declare dials:
     #
     #   Dials.define do
-    #     dial :merchant_fee_bps, 100, type: :integer, bounds: 1..10_000,
+    #     dial :merchant_fee_bps, default: 100, type: :integer, bounds: 1..10_000,
     #          unit: "bps", variants: { market: { options: %w[KE NG BD] } }
-    #     dial :signups_enabled, true, type: :boolean
+    #     dial :signups_enabled, default: true, type: :boolean
     #   end
+    #
+    # Each declaration generates the dial's methods: use_merchant_fee_bps,
+    # adjust_merchant_fee_bps, clear_merchant_fee_bps (see Generated).
     def define(&)
       registry.instance_eval(&)
     end
@@ -84,8 +98,10 @@ module Dials
 
     # -- reads ---------------------------------------------------------------
 
-    # Resolve a dial. Scope is passed as keyword arguments and must name
-    # every dimension the dial declares — no more, no less:
+    # Resolve a dial by key — the primitive under the generated use_<key>
+    # methods, for callers that receive the key at runtime. Scope is passed
+    # as keyword arguments and must name every dimension the dial declares —
+    # no more, no less:
     #
     #   Dials.get(:signups_enabled)                     # global-only dial
     #   Dials.get(:merchant_fee_bps, market: "KE")      # varied dial
@@ -112,10 +128,11 @@ module Dials
 
     # -- writes --------------------------------------------------------------
 
-    # Store an override. With no scope, overrides the global; with a scope,
-    # creates or updates the variation for exactly that scope. The value is
-    # validated against the dial's type and bounds; `actor:` is required and
-    # lands in the change log.
+    # Store an override by key — the primitive under the generated
+    # adjust_<key> methods. With no scope, overrides the global; with a
+    # scope, creates or updates the variation for exactly that scope. The
+    # value is validated against the dial's type and bounds; `actor:` is
+    # required and lands in the change log.
     def set(key, value, actor:, scope: nil)
       definition = registry.fetch(key)
       actor_attrs = Actor.normalize(actor)
@@ -134,7 +151,8 @@ module Dials
       value
     end
 
-    # Remove an override, returning resolution to the next layer down: a
+    # Remove an override by key — the primitive under the generated
+    # clear_<key> methods — returning resolution to the next layer down: a
     # cleared variation inherits the global; a cleared global inherits the
     # code default. Returns true if an override existed. Clearing what is not
     # there is a no-op (and logs nothing).

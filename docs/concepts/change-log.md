@@ -6,12 +6,13 @@ audit afterthought.
 
 ## Every write is attributed
 
-`Dials.set` and `Dials.clear` require `actor:`. Passing `nil` raises
+Every write path — the generated `adjust_`/`clear_` methods and the `set`/
+`clear` primitives beneath them — requires `actor:`. Passing `nil` raises
 `Dials::MissingActor`. There is no anonymous mutation path through the
 public API:
 
 ```ruby
-Dials.set(:checkout_fee_bps, 120, scope: { market: "BD" }, actor: current_admin)
+Dials.adjust_checkout_fee_bps(120, actor: current_admin, market: "BD")
 ```
 
 The actor can be any object. An ActiveRecord-ish object contributes its class

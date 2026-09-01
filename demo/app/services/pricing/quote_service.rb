@@ -15,8 +15,8 @@ module Pricing
     end
 
     def quote(subtotal_cents)
-      fee_bps = Dials.get(:checkout_fee_bps, market: @market)
-      threshold = Dials.get(:free_delivery_threshold, market: @market, platform: @platform)
+      fee_bps = Dials.use_checkout_fee_bps(market: @market)
+      threshold = Dials.use_free_delivery_threshold(market: @market, platform: @platform)
 
       fee_cents = (subtotal_cents * fee_bps) / 10_000
       Quote.new(

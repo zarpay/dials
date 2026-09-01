@@ -21,13 +21,13 @@ class RegistryTest < Minitest::Test
   def test_duplicate_key_raises
     define_standard_dials
     assert_raises(Dials::DuplicateDial) do
-      Dials.define { dial :signups_enabled, false, type: :boolean }
+      Dials.define { dial :signups_enabled, default: false, type: :boolean }
     end
   end
 
   def test_declarations_accumulate_across_define_blocks
-    Dials.define { dial :a, 1, type: :integer }
-    Dials.define { dial :b, 2, type: :integer }
+    Dials.define { dial :a, default: 1, type: :integer }
+    Dials.define { dial :b, default: 2, type: :integer }
     assert_equal %i[a b], Dials.registry.keys
   end
 

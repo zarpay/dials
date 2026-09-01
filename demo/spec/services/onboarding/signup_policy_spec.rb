@@ -10,19 +10,19 @@ RSpec.describe Onboarding::SignupPolicy do
   end
 
   it "stops everywhere when the kill switch is flipped to false" do
-    Dials.set(:signups_enabled, false, actor: actor)
+    Dials.adjust_signups_enabled(false, actor: actor)
     expect(described_class.allowed?).to be(false)
   end
 
   it "can be flipped back on (false → true → false round trips)" do
-    Dials.set(:signups_enabled, false, actor: actor)
-    Dials.set(:signups_enabled, true, actor: actor)
+    Dials.adjust_signups_enabled(false, actor: actor)
+    Dials.adjust_signups_enabled(true, actor: actor)
     expect(described_class.allowed?).to be(true)
   end
 
   it "cannot be given a per-market value — the switch is global by design" do
     expect do
-      Dials.set(:signups_enabled, false, scope: { market: "KE" }, actor: actor)
+      Dials.adjust_signups_enabled(false, actor: actor, market: "KE")
     end.to raise_error(Dials::InvalidScope)
   end
 

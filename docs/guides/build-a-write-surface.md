@@ -10,6 +10,12 @@ The demo app's
 [`Admin::DialsController`](https://github.com/zarpay/dials/blob/main/demo/app/controllers/admin/dials_controller.rb)
 is the reference implementation. The essentials:
 
+One note on API choice: this surface uses the key-taking primitives
+(`Dials.get` / `Dials.set` / `Dials.clear`) rather than the generated
+per-dial methods, because the dial key arrives as a request param — this is
+exactly the dynamic-access case the primitives exist for. Application code
+with the dial in hand uses `Dials.use_checkout_fee_bps(...)` and friends.
+
 ## Render from the registry
 
 ```ruby

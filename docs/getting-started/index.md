@@ -22,23 +22,24 @@ Dials.configure do |config|
 end
 
 Dials.define do
-  dial :checkout_fee_bps, 250,
+  dial :checkout_fee_bps, default: 250,
        type: :integer,
        bounds: 1..10_000,
        unit: "bps",
        description: "Fee charged on checkout, in basis points.",
        variants: { market: { options: %w[KE NG BD] } }
 
-  dial :signups_enabled, true,
+  dial :signups_enabled, default: true,
        type: :boolean,
        description: "Global kill switch for new signups."
 end
 ```
 
-Each `dial` takes a key, a **code default**, and:
+Each `dial` takes a key and:
 
 | Option | Meaning |
 |---|---|
+| `default:` | the **code default** — what the dial serves until an operator overrides it |
 | `type:` | `:boolean`, `:integer`, `:float`, `:string`, or `:json` |
 | `bounds:` | optional — a `Range`, an `Array` of allowed values, or a callable |
 | `variants:` | optional — the dial's variant dimensions (see below) |
@@ -47,36 +48,53 @@ Each `dial` takes a key, a **code default**, and:
 A dial with no `variants:` is **global-only**: it can never hold per-scope
 values, which is exactly what you want for a kill switch.
 
+Declaring a dial generates its methods: `use_<key>` to read,
+`adjust_<key>` to write, `clear_<key>` to remove an override. They are real
+methods, defined at declaration time — `respond_to?`, tab completion, and
+grep all work.
+
 ## Read
 
 ```ruby
-Dials.get(:signups_enabled)                  # global-only dial: no scope
-Dials.get(:checkout_fee_bps, market: "KE")   # varied dial: scope required
+Dials.use_signups_enabled                  # global-only dial: no scope
+Dials.use_checkout_fee_bps(market: "KE")   # varied dial: scope required
 ```
 
 The scope must name **every** dimension the dial declares — a missing or
 unknown dimension raises `Dials::InvalidScope` immediately, in development,
 not quietly in production.
 
-Reads cost a hash lookup. No query runs per `get` — see [Caching](/concepts/caching).
+Reads cost a hash lookup. No query runs per read — see [Caching](/concepts/caching).
 
 ## Write
 
 ```ruby
 # Global override (applies wherever no variation exists):
-Dials.set(:checkout_fee_bps, 300, actor: current_admin)
+Dials.adjust_checkout_fee_bps(300, actor: current_admin)
 
 # Per-market variation:
-Dials.set(:checkout_fee_bps, 120, scope: { market: "BD" }, actor: current_admin)
+Dials.adjust_checkout_fee_bps(120, actor: current_admin, market: "BD")
 
 # Remove overrides (each layer falls back to the one below):
-Dials.clear(:checkout_fee_bps, scope: { market: "BD" }, actor: current_admin)
-Dials.clear(:checkout_fee_bps, actor: current_admin)
+Dials.clear_checkout_fee_bps(actor: current_admin, market: "BD")
+Dials.clear_checkout_fee_bps(actor: current_admin)
 ```
 
 `actor:` is required on every write — there is no anonymous mutation path.
-Values are validated against the declared type and bounds before anything is
-stored.
+(That is also why `actor` is a reserved dimension name.) Values are validated
+against the declared type and bounds before anything is stored.
+
+## Dynamic access
+
+When the dial key arrives at runtime — an admin surface iterating the
+registry, a console one-liner — use the key-taking primitives that the
+generated methods delegate to:
+
+```ruby
+Dials.get(:checkout_fee_bps, market: "KE")
+Dials.set(:checkout_fee_bps, 120, scope: { market: "BD" }, actor: current_admin)
+Dials.clear(:checkout_fee_bps, scope: { market: "BD" }, actor: current_admin)
+```
 
 ## History
 

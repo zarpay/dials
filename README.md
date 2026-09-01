@@ -14,14 +14,14 @@ log.
 
 ```ruby
 Dials.define do
-  dial :checkout_fee_bps, 250,
+  dial :checkout_fee_bps, default: 250,
        type: :integer, bounds: 1..10_000, unit: "bps",
        variants: { market: { options: %w[KE NG BD] } }
 end
 
-Dials.get(:checkout_fee_bps, market: "KE")                                    # => 250
-Dials.set(:checkout_fee_bps, 120, scope: { market: "BD" }, actor: admin)
-Dials.get(:checkout_fee_bps, market: "BD")                                    # => 120
+Dials.use_checkout_fee_bps(market: "KE")                       # => 250
+Dials.adjust_checkout_fee_bps(120, actor: admin, market: "BD")
+Dials.use_checkout_fee_bps(market: "BD")                       # => 120
 ```
 
 ## Repository layout

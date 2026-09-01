@@ -9,7 +9,7 @@ class CacheTest < Minitest::Test
 
   def setup
     super
-    Dials.define { dial :fee, 100, type: :integer }
+    Dials.define { dial :fee, default: 100, type: :integer }
   end
 
   # Simulates another process writing to the shared store: mutate the store

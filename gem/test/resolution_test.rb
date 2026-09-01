@@ -77,7 +77,7 @@ class ResolutionTest < Minitest::Test
   end
 
   def test_json_values_are_deep_frozen_on_read
-    Dials.define { dial :fee_table, { "base" => 1 }, type: :json }
+    Dials.define { dial :fee_table, default: { "base" => 1 }, type: :json }
     Dials.set(:fee_table, { "base" => 2, "tiers" => [1, 2] }, actor: ACTOR)
     value = Dials.get(:fee_table)
     assert value.frozen?

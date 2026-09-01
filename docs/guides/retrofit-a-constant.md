@@ -21,7 +21,7 @@ end
 ```ruby
 # config/initializers/dials.rb
 Dials.define do
-  dial :checkout_fee_bps, 250,
+  dial :checkout_fee_bps, default: 250,
        type: :integer,
        bounds: 1..10_000,
        unit: "bps",
@@ -41,7 +41,7 @@ being an incident.
 ```ruby
 class Checkout::FeeCalculator
   def fee_cents(subtotal_cents)
-    (subtotal_cents * Dials.get(:checkout_fee_bps)) / 10_000
+    (subtotal_cents * Dials.use_checkout_fee_bps) / 10_000
   end
 end
 ```
@@ -59,14 +59,14 @@ When the BD market needs a different fee, one PR does both halves:
 
 ```ruby
 # The arming diff — visible in review:
-dial :checkout_fee_bps, 250,
+dial :checkout_fee_bps, default: 250,
      type: :integer, bounds: 1..10_000, unit: "bps",
      variants: { market: { options: %w[KE NG BD] } }
 ```
 
 ```ruby
 # ...and the reader grows its scope in the same PR:
-Dials.get(:checkout_fee_bps, market: @market)
+Dials.use_checkout_fee_bps(market: @market)
 ```
 
 Note the read signature changed: a varied dial **requires** its scope. Every
@@ -77,7 +77,7 @@ Then the operator sets the value through your write surface (or console,
 attributed):
 
 ```ruby
-Dials.set(:checkout_fee_bps, 120, scope: { market: "BD" }, actor: "keith — BD launch")
+Dials.adjust_checkout_fee_bps(120, actor: "keith — BD launch", market: "BD")
 ```
 
 ## Tests

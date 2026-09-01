@@ -18,7 +18,7 @@ else in the gem exists to keep this rule honest.
 This is the load-bearing decision. When you declare
 
 ```ruby
-dial :checkout_fee_bps, 250, type: :integer, bounds: 1..10_000
+dial :checkout_fee_bps, default: 250, type: :integer, bounds: 1..10_000
 ```
 
 **no row is written anywhere**. The default lives in code, under code review,
@@ -79,11 +79,11 @@ overrides" and "no rows" stay synonyms.
 
 The gem's validation never confuses "no value" with `false`:
 
-- `Dials.set(:signups_enabled, false, actor: ...)` stores JSON `false`.
+- `Dials.adjust_signups_enabled(false, actor: ...)` stores JSON `false`.
 - SQL `NULL` is reserved for "no override".
 - `nil` is not a storable value for any type — removing an override is
-  `Dials.clear`, so a stored nil could only ever be an accident, and the gem
-  rejects it.
+  `clear_signups_enabled`, so a stored nil could only ever be an accident,
+  and the gem rejects it.
 
 This sounds obvious. It is also the single most common way settings systems
 break: a presence validation that rejects `false` makes a kill switch

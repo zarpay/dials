@@ -6,7 +6,7 @@ class DefinitionTest < Minitest::Test
   include DialsTestSupport
 
   def build(key = :fee, default = 10, **)
-    Dials::Definition.new(key, default, type: :integer, **)
+    Dials::Definition.new(key, default: default, type: :integer, **)
   end
 
   def test_valid_types

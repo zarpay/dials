@@ -7,7 +7,7 @@ module Dials
   # scope of that dial. Nesting composes; inner blocks win.
   #
   #   Dials::Testing.with_overrides(merchant_fee_bps: 250) do
-  #     Dials.get(:merchant_fee_bps, market: "KE") # => 250
+  #     Dials.use_merchant_fee_bps(market: "KE") # => 250
   #   end
   #
   # Values are validated against the dial's declaration, so a test cannot

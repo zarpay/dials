@@ -6,7 +6,7 @@ RSpec.describe "Dial change log", type: :model do
   let(:actor) { AdminUser.new(id: 7, email: "keith@bazario.example") }
 
   it "attributes every write with type, id, and label" do
-    Dials.set(:checkout_fee_bps, 300, actor: actor)
+    Dials.adjust_checkout_fee_bps(300, actor: actor)
 
     change = Dials.changes.first
     expect(change.actor_type).to eq("AdminUser")
@@ -15,9 +15,9 @@ RSpec.describe "Dial change log", type: :model do
   end
 
   it "records old and new values through a set/set/clear lifecycle" do
-    Dials.set(:checkout_fee_bps, 300, actor: actor)
-    Dials.set(:checkout_fee_bps, 400, actor: actor)
-    Dials.clear(:checkout_fee_bps, actor: actor)
+    Dials.adjust_checkout_fee_bps(300, actor: actor)
+    Dials.adjust_checkout_fee_bps(400, actor: actor)
+    Dials.clear_checkout_fee_bps(actor: actor)
 
     changes = Dials.changes(key: :checkout_fee_bps)
     expect(changes.map(&:action)).to eq(%w[clear set set])
@@ -26,19 +26,19 @@ RSpec.describe "Dial change log", type: :model do
   end
 
   it "records the scope on variation changes" do
-    Dials.set(:checkout_fee_bps, 120, scope: { market: "BD" }, actor: actor)
+    Dials.adjust_checkout_fee_bps(120, actor: actor, market: "BD")
     change = Dials.changes.first
     expect(change.scope).to eq(market: "BD")
     expect(change.global?).to be(false)
   end
 
   it "does not log no-op clears" do
-    Dials.clear(:checkout_fee_bps, actor: actor)
+    Dials.clear_checkout_fee_bps(actor: actor)
     expect(Dials.changes).to be_empty
   end
 
   it "persists to the dial_changes table (append-only, created_at only)" do
-    Dials.set(:checkout_fee_bps, 300, actor: actor)
+    Dials.adjust_checkout_fee_bps(300, actor: actor)
     row = Dials::ActiveRecord::Change.sole
     expect(row.key).to eq("checkout_fee_bps")
     expect(row).not_to respond_to(:updated_at)

@@ -36,31 +36,31 @@ Dials.configure do |config|
 end
 
 Dials.define do
-  dial :checkout_fee_bps, 250,
+  dial :checkout_fee_bps, default: 250,
        type: :integer,
        bounds: 1..10_000,
        unit: "bps",
        description: "Fee charged on checkout, in basis points of the order total.",
        variants: { market: { options: markets } }
 
-  dial :free_delivery_threshold, 5_000,
+  dial :free_delivery_threshold, default: 5_000,
        type: :integer,
        bounds: 0..1_000_000,
        unit: "cents",
        description: "Order totals at or above this ship free.",
        variants: { market: { options: markets }, platform: { options: platforms } }
 
-  dial :signups_enabled, true,
+  dial :signups_enabled, default: true,
        type: :boolean,
        description: "Global kill switch for new signups. Deliberately global-only: " \
                     "when things are on fire you want one switch, not one per market."
 
-  dial :support_email, "support@bazario.example",
+  dial :support_email, default: "support@bazario.example",
        type: :string,
        bounds: ->(value) { value.match?(URI::MailTo::EMAIL_REGEXP) },
        description: "Reply-to address shown across the product."
 
-  dial :welcome_banner, { "headline" => "Welcome to Bazario", "cta" => "Start shopping" },
+  dial :welcome_banner, default: { "headline" => "Welcome to Bazario", "cta" => "Start shopping" },
        type: :json,
        description: "Structured homepage banner copy.",
        variants: { locale: {} } # open dimension: any non-empty locale string

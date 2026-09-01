@@ -8,17 +8,17 @@ varies by locale; its kill switch must never vary at all. So variant
 dimensions are declared per dial:
 
 ```ruby
-dial :checkout_fee_bps, 250, type: :integer,
+dial :checkout_fee_bps, default: 250, type: :integer,
      variants: { market: { options: %w[KE NG BD] } }
 
-dial :free_delivery_threshold, 5_000, type: :integer,
+dial :free_delivery_threshold, default: 5_000, type: :integer,
      variants: { market: { options: %w[KE NG BD] },
                  platform: { options: %w[ios android web] } }
 
-dial :welcome_banner, { "headline" => "Welcome" }, type: :json,
+dial :welcome_banner, default: { "headline" => "Welcome" }, type: :json,
      variants: { locale: {} }        # open dimension: any non-empty string
 
-dial :signups_enabled, true, type: :boolean   # no variants: global-only
+dial :signups_enabled, default: true, type: :boolean   # no variants: global-only
 ```
 
 A dimension with `options:` validates every scope value against the list
@@ -26,6 +26,10 @@ A dimension with `options:` validates every scope value against the list
 `-> { ISO3166::Country.codes }`). An open dimension accepts any non-empty
 string. Dimension values are compared as strings: `market: :KE` and
 `market: "KE"` are the same scope.
+
+One name is reserved: a dimension cannot be called `actor`. On the generated
+`adjust_`/`clear_` methods scope travels as bare keywords next to `actor:`,
+which must always mean attribution.
 
 ## Declaring variants IS the arming gate
 
@@ -53,10 +57,10 @@ operator with production console access to the API.
 Both reads and writes must name **every** declared dimension:
 
 ```ruby
-Dials.get(:free_delivery_threshold, market: "KE", platform: "ios")   # ✓
-Dials.get(:free_delivery_threshold, market: "KE")                    # InvalidScope
-Dials.get(:free_delivery_threshold)                                  # InvalidScope
-Dials.get(:signups_enabled, market: "KE")                            # InvalidScope
+Dials.use_free_delivery_threshold(market: "KE", platform: "ios")   # ✓
+Dials.use_free_delivery_threshold(market: "KE")                    # InvalidScope
+Dials.use_free_delivery_threshold                                  # InvalidScope
+Dials.use_signups_enabled(market: "KE")                            # InvalidScope
 ```
 
 One sentence to remember: **a variation matches exactly, or you get the

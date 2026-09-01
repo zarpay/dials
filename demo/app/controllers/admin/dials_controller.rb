@@ -12,6 +12,12 @@ module Admin
   #
   # Attribution: the authenticated admin is passed as actor: on every write.
   # Validation: the gem raises typed errors; they render as 422/400 here.
+  #
+  # This controller uses the key-taking primitives (Dials.get/set/clear)
+  # rather than the generated per-dial methods, because the key arrives as a
+  # request param — this is exactly the dynamic-access case the primitives
+  # exist for. Application code with the dial in hand uses the generated
+  # forms (see app/services).
   class DialsController < ApplicationController
     rescue_from Dials::UnknownDial, with: -> { head :not_found }
     rescue_from Dials::InvalidValue, Dials::InvalidScope, Dials::MissingActor do |error|

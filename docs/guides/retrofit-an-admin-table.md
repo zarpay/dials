@@ -14,7 +14,7 @@ Flow-through semantics, one value, operator-owned. These migrate.
 **Step 1 — declare, with the code default = today's production value.**
 
 ```ruby
-dial :graduation_window_hours, 24,   # ← what production serves today
+dial :graduation_window_hours, default: 24,   # ← what production serves today
      type: :integer, bounds: 0..8_760,
      description: "Hours before a waitlisted signup auto-graduates."
 ```
@@ -29,16 +29,16 @@ class MigrateGraduationWindowToDials < ActiveRecord::Migration[8.1]
   def up
     legacy = execute("SELECT value FROM legacy_settings WHERE key = 'graduation_window'")
     value = Integer(legacy.first["value"])
-    Dials.set(:graduation_window_hours, value, actor: "migration #{self.class.name}") if value != 24
+    Dials.adjust_graduation_window_hours(value, actor: "migration #{self.class.name}") if value != 24
   end
 end
 ```
 
-`Dials.set` in a migration is fine: it validates, attributes ("who" is the
+A dial write in a migration is fine: it validates, attributes ("who" is the
 migration), and logs — the change log's first entry documents the handover.
 
 **Step 2 — repoint readers.** Replace every read of the legacy row with
-`Dials.get(:graduation_window_hours)`. Grep is your friend; the legacy key
+`Dials.use_graduation_window_hours`. Grep is your friend; the legacy key
 string is usually distinctive.
 
 **Step 3 — freeze, then drop.** Make the legacy row read-only in the old
@@ -54,7 +54,7 @@ untangles the sentinel:
 
 ```ruby
 # The sentinel row becomes the global; real countries become variations.
-dial :graduation_window_hours, 24, type: :integer, bounds: 0..8_760,
+dial :graduation_window_hours, default: 24, type: :integer, bounds: 0..8_760,
      variants: { market: { options: MARKETS } }
 ```
 
@@ -63,10 +63,10 @@ def up
   rows = execute("SELECT country, value FROM legacy_settings WHERE key = 'graduation_window'")
   rows.each do |row|
     if row["country"] == "XX"
-      Dials.set(:graduation_window_hours, Integer(row["value"]), actor: "migration")
+      Dials.adjust_graduation_window_hours(Integer(row["value"]), actor: "migration")
     else
-      Dials.set(:graduation_window_hours, Integer(row["value"]),
-                scope: { market: row["country"] }, actor: "migration")
+      Dials.adjust_graduation_window_hours(Integer(row["value"]),
+                                           actor: "migration", market: row["country"])
     end
   end
 end
@@ -76,7 +76,7 @@ The sentinel does not survive: after migration, the global lives on the
 parent and every market row is a real variation with a real foreign key.
 Verify with a before/after read matrix in the migration or a one-off spec —
 every (key, country) the legacy table answered must resolve identically
-through `Dials.get`.
+through the dial read.
 
 ## Bucket 3 — everything else
 

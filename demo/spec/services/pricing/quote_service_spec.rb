@@ -13,7 +13,7 @@ RSpec.describe Pricing::QuoteService do
   end
 
   it "picks up a per-market fee variation without the service changing" do
-    Dials.set(:checkout_fee_bps, 100, scope: { market: "BD" }, actor: actor)
+    Dials.adjust_checkout_fee_bps(100, actor: actor, market: "BD")
 
     bd = described_class.new(market: "BD", platform: "ios").quote(10_000)
     ke = described_class.new(market: "KE", platform: "ios").quote(10_000)
@@ -23,7 +23,7 @@ RSpec.describe Pricing::QuoteService do
   end
 
   it "applies market × platform delivery thresholds" do
-    Dials.set(:free_delivery_threshold, 20_000, scope: { market: "KE", platform: "web" }, actor: actor)
+    Dials.adjust_free_delivery_threshold(20_000, actor: actor, market: "KE", platform: "web")
 
     web = described_class.new(market: "KE", platform: "web").quote(10_000)
     ios = described_class.new(market: "KE", platform: "ios").quote(10_000)

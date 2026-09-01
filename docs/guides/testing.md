@@ -25,13 +25,13 @@ Properties worth knowing:
   test override can't mask a call-site bug.
 - `false` pins fine — kill-switch specs work.
 
-Prefer `with_overrides` for consumer specs. Reach for real `Dials.set` writes
+Prefer `with_overrides` for consumer specs. Reach for real `adjust_*` writes
 only when the *dial layer itself* is what you're testing (resolution,
 history, the write surface).
 
 ## The one line of hygiene
 
-With transactional specs, an example's `Dials.set` rolls back with the
+With transactional specs, an example's dial write rolls back with the
 transaction — but the per-process **cache** would keep serving the value into
 later examples. Reset it:
 
@@ -80,5 +80,5 @@ and your registry pins.
 
 The demo runs `:active_record` in test so its suite proves persistence. Apps
 that only *consume* dials can set `config.store = :memory` in the test
-environment for a suite that never touches the dial tables — every
-`Dials.set` still validates and logs identically against the in-memory store.
+environment for a suite that never touches the dial tables — every write
+still validates and logs identically against the in-memory store.

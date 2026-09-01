@@ -7,7 +7,7 @@ module Onboarding
   # determined operator; the gem rejects any scoped write for it.
   class SignupPolicy
     def self.allowed?
-      Dials.get(:signups_enabled)
+      Dials.use_signups_enabled
     end
   end
 end

@@ -31,7 +31,7 @@ Dials.configure do |config|
 end
 
 Dials.define do
-  dial :checkout_fee_bps, 250,
+  dial :checkout_fee_bps, default: 250,
        type: :integer, bounds: 1..10_000, unit: "bps",
        description: "Fee charged on checkout, in basis points.",
        variants: { market: { options: %w[KE NG BD] } }
@@ -56,7 +56,7 @@ class Pricing::QuoteService
   end
 
   def fee_cents(subtotal_cents)
-    (subtotal_cents * Dials.get(:checkout_fee_bps, market: @market)) / 10_000
+    (subtotal_cents * Dials.use_checkout_fee_bps(market: @market)) / 10_000
   end
 end
 ```
@@ -69,7 +69,8 @@ Consumers never know which layer a value came from. That is the point.
   armed for variation, so arming shows up in review as a failing pin — copy
   [`demo/spec/dials/registry_spec.rb`](https://github.com/zarpay/dials/blob/main/demo/spec/dials/registry_spec.rb).
 - **The test-suite hygiene line** — see [Testing with Dials](/guides/testing).
-- **A write surface** with your app's auth in front of `Dials.set` — see
+- **A write surface** with your app's auth in front of the write path — see
   [Build a Write Surface](/guides/build-a-write-surface). Until you build
-  one, `Dials.set` from a console (with a real `actor:` string, e.g. your
-  name) is a legitimate, fully-logged interim surface.
+  one, `Dials.adjust_checkout_fee_bps(...)` from a console (with a real
+  `actor:` string, e.g. your name) is a legitimate, fully-logged interim
+  surface.

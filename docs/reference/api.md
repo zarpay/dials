@@ -7,16 +7,21 @@
 Runs the block against the registry. Blocks accumulate; a duplicate key
 raises `Dials::DuplicateDial` at boot.
 
-### `dial(key, default, type:, bounds: nil, label: nil, unit: nil, description: nil, variants: nil)`
+### `dial(key, default:, type:, bounds: nil, label: nil, unit: nil, description: nil, variants: nil)`
 
 Declares one dial (inside a `define` block). Raises
-`Dials::InvalidDefinition` at boot when the declaration is malformed or the
-default fails its own type/bounds.
+`Dials::InvalidDefinition` at boot when the declaration is malformed, the
+default fails its own type/bounds, or a generated method name is already
+taken.
+
+Each declaration generates the dial's three methods on `Dials`:
+`use_<key>`, `adjust_<key>`, `clear_<key>` (see below). They are defined at
+declaration time — real methods, not `method_missing`.
 
 | Argument | Type | Notes |
 |---|---|---|
-| `key` | Symbol/String | unique across the app |
-| `default` | value | the code default; validated like any stored value |
+| `key` | Symbol/String | unique across the app; the only positional argument |
+| `default:` | value | the code default; validated like any stored value |
 | `type:` | Symbol | `:boolean` `:integer` `:float` `:string` `:json` |
 | `bounds:` | Range, Array, or callable | optional; callable returns truthy for storable |
 | `label:` | String | defaults to the humanized key |
@@ -34,14 +39,30 @@ variants: { locale: {} }                          # open: any non-empty string
 variants: [:market, :platform]                    # names only, all open
 ```
 
+`actor` is a reserved dimension name — on the generated `adjust_`/`clear_`
+methods it always means attribution, never scope.
+
 ## Reading
 
-### `Dials.get(key, **scope) → value`
+### `Dials.use_<key>(**scope) → value`
+
+The generated reader:
+
+```ruby
+Dials.use_signups_enabled                  # global-only dial
+Dials.use_checkout_fee_bps(market: "KE")   # varied dial
+```
 
 Resolves variation → global override → code default. Scope must name every
 declared dimension exactly (values compared as strings). Raises
-`Dials::UnknownDial`, `Dials::InvalidScope`. Returned `:json` values are
-deep-frozen; hash keys are strings.
+`Dials::InvalidScope`. Returned `:json` values are deep-frozen; hash keys
+are strings.
+
+### `Dials.get(key, **scope) → value`
+
+The key-taking primitive under `use_<key>`, for code that receives the key
+at runtime (an admin surface, a console). Same semantics; also raises
+`Dials::UnknownDial` for an undeclared key.
 
 ### `Dials.registry`
 
@@ -60,18 +81,32 @@ definition.problems_for(value)      # [] when storable, else messages
 
 ## Writing
 
-### `Dials.set(key, value, actor:, scope: nil) → value`
+### `Dials.adjust_<key>(value, actor:, **scope) → value`
 
-Stores an override — global without `scope:`, a variation with. Validates
-type, bounds, and scope; requires `actor:`. Appends to the change log and
-busts the local cache. Raises `Dials::InvalidValue`, `Dials::InvalidScope`,
-`Dials::MissingActor`, `Dials::UnknownDial`.
+The generated writer:
 
-### `Dials.clear(key, actor:, scope: nil) → true/false`
+```ruby
+Dials.adjust_checkout_fee_bps(300, actor: current_admin)                # global
+Dials.adjust_checkout_fee_bps(120, actor: current_admin, market: "BD")  # variation
+```
 
-Removes an override; resolution falls to the next layer down. Returns
-whether an override existed; clearing nothing is a silent no-op (no log
-entry).
+Stores an override — global with no scope keywords, a variation with them.
+Validates type, bounds, and scope; requires `actor:` (which is why `actor`
+is a reserved dimension name). Appends to the change log and busts the local
+cache. Raises `Dials::InvalidValue`, `Dials::InvalidScope`,
+`Dials::MissingActor`.
+
+### `Dials.clear_<key>(actor:, **scope) → true/false`
+
+The generated remover. Removes an override; resolution falls to the next
+layer down. Returns whether an override existed; clearing nothing is a
+silent no-op (no log entry).
+
+### `Dials.set(key, value, actor:, scope: nil)` / `Dials.clear(key, actor:, scope: nil)`
+
+The key-taking primitives under `adjust_<key>` / `clear_<key>`, for dynamic
+access. Scope travels as an explicit hash (`scope: { market: "BD" }`); both
+also raise `Dials::UnknownDial` for an undeclared key.
 
 ### `Dials.changes(key: nil, limit: 50) → [ChangeRecord]`
 

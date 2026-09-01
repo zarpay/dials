@@ -89,6 +89,27 @@ column give exact uniqueness, portability, and zero-migration dimension
 growth. The same reasoning makes all value columns JSON *text* rather than
 jsonb.
 
+## Generated per-dial methods, with prefixes that carry the verb
+
+The primary API is generated at declaration time: `Dials.use_base_fee(...)`,
+`Dials.adjust_base_fee(...)`, `Dials.clear_base_fee(...)`. An earlier
+iteration rejected generated methods because a bare `Dials.store_amount`
+reads like a write when it is a read — the method name carried the dial's
+noun but no verb. The `use_` / `adjust_` / `clear_` prefixes resolve that
+objection: every generated name states its direction, and a read can never
+be mistaken for a mutation.
+
+Three properties keep the dynamic layer honest:
+
+- The methods are **defined at declaration time**, never `method_missing` —
+  `respond_to?`, tab completion, and a grep for `use_base_fee` all work, and
+  a name collision raises `InvalidDefinition` at boot.
+- The key-taking primitives (`Dials.get` / `set` / `clear`) **stay public**
+  as the dynamic-access layer, because a write surface receives the key as a
+  request param and cannot name a method statically.
+- Scope travels as bare keywords on the generated forms, so **`actor` is a
+  reserved dimension name** — on a write it must always mean attribution.
+
 ## No bundled GUI
 
 The original system's dashboard was a bespoke Rails controller with CAS

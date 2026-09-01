@@ -9,7 +9,7 @@ class MemoryStoreTest < Minitest::Test
 
   def setup
     super
-    Dials.define { dial :fee_table, { "base" => 1 }, type: :json }
+    Dials.define { dial :fee_table, default: { "base" => 1 }, type: :json }
   end
 
   def test_stored_values_are_detached_from_caller_objects
@@ -41,7 +41,7 @@ class MemoryStoreTest < Minitest::Test
   end
 
   def test_false_round_trips_through_the_memory_store
-    Dials.define { dial :flag, true, type: :boolean }
+    Dials.define { dial :flag, default: true, type: :boolean }
     Dials.set(:flag, false, actor: ACTOR)
     Dials.reload!
     assert_equal false, Dials.get(:flag)

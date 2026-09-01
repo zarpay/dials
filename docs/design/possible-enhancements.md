@@ -32,7 +32,7 @@ answer. Until a dial exists whose scope fan-out is genuinely painful
 
 ## An explicit global read (`Dials.global`)
 
-**The idea.** On a varied dial, `Dials.get(:key)` without scope raises by
+**The idea.** On a varied dial, `Dials.use_<key>` without scope raises by
 design — a scopeless read is usually a context-threading shortcut that
 silently serves the wrong value once variations exist (see
 [Variants and Scopes](/concepts/variants-and-scopes)). But there may be
@@ -66,7 +66,7 @@ package (`dials-admin`), never in the core gem.
 
 **The idea.** Two operators open the same dial; both edit; the second write
 silently clobbers the first. A CAS-style write —
-`Dials.set(..., expect: <the value or change-id the operator saw>)` —
+`Dials.adjust_<key>(..., expect: <the value or change-id the operator saw>)` —
 would reject the second write with a "value changed under you" error for
 the surface to render.
 

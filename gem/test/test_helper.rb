@@ -20,12 +20,12 @@ module DialsTestSupport
 
   def define_standard_dials
     Dials.define do
-      dial :merchant_fee_bps, 100, type: :integer, bounds: 1..10_000, unit: "bps",
+      dial :merchant_fee_bps, default: 100, type: :integer, bounds: 1..10_000, unit: "bps",
            variants: { market: { options: %w[KE NG BD] } }
-      dial :signups_enabled, true, type: :boolean
-      dial :free_delivery_threshold, 50, type: :integer, bounds: 0..1_000_000,
+      dial :signups_enabled, default: true, type: :boolean
+      dial :free_delivery_threshold, default: 50, type: :integer, bounds: 0..1_000_000,
            variants: { market: { options: %w[KE NG BD] }, platform: { options: %w[ios android web] } }
-      dial :support_email, "support@example.com", type: :string
+      dial :support_email, default: "support@example.com", type: :string
     end
   end
 end

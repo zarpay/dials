@@ -17,12 +17,16 @@ module Dials
       @mutex = Mutex.new
     end
 
-    # DSL entry point used by `Dials.define { dial ... }`.
-    def dial(key, default, **)
-      definition = Definition.new(key, default, **)
+    # DSL entry point used by `Dials.define { dial ... }`. Registering a key
+    # also generates its per-dial methods (Dials.use_<key> and friends);
+    # Generated.install! checks for name collisions before defining anything,
+    # so a raise here leaves neither a definition nor a stray method behind.
+    def dial(key, **)
+      definition = Definition.new(key, **)
       @mutex.synchronize do
         raise DuplicateDial, "dial #{definition.key} is already defined" if @definitions.key?(definition.key)
 
+        Generated.install!(definition)
         @definitions[definition.key] = definition
       end
       definition
@@ -50,10 +54,14 @@ module Dials
       @definitions.values
     end
 
-    # Test hook: wipe every declaration. Production code has no reason to
-    # call this; a registry that shrinks at runtime would strand stored rows.
+    # Test hook: wipe every declaration and its generated methods. Production
+    # code has no reason to call this; a registry that shrinks at runtime
+    # would strand stored rows.
     def reset!
-      @mutex.synchronize { @definitions.clear }
+      @mutex.synchronize do
+        @definitions.clear
+        Generated.uninstall_all!
+      end
     end
   end
 end

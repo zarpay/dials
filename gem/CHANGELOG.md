@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+- **Breaking: `default:` is now a keyword argument in declarations.** The
+  dial key is the only positional argument:
+  `dial :checkout_fee_bps, default: 250, type: :integer, bounds: 1..10_000`.
+  The bare positional value was the one unlabeled thing in an otherwise
+  fully-named declaration.
+- **Generated per-dial methods are now the primary API.** Declaring
+  `dial :base_fee, ...` defines `Dials.use_base_fee(**scope)`,
+  `Dials.adjust_base_fee(value, actor:, **scope)`, and
+  `Dials.clear_base_fee(actor:, **scope)` at declaration time (real methods,
+  not `method_missing`). The key-taking primitives (`Dials.get` / `Dials.set`
+  / `Dials.clear`) remain public as the dynamic-access layer for code that
+  receives the key at runtime (admin surfaces, consoles). A declaration whose
+  generated names collide with an existing method raises
+  `InvalidDefinition`, and `actor` is now a reserved dimension name (on the
+  generated writers it always means attribution, never scope).
+
 Hardening from an adversarial (Codex) review of the 0.1.0 core:
 
 - Cache version is now the change log's `[row count, max id]` — max id alone

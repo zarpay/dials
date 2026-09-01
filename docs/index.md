@@ -41,35 +41,39 @@ Dials is that whole arc, designed once:
 - **Variants are first-class.** `variants: { market: { options: %w[KE NG BD] } }`
   arms a dial for per-market values; the gem validates every scope against
   the declaration.
-- **Every write is attributed.** `Dials.set(..., actor: current_admin)` is the
-  only write path, and it appends to a change log you can render as history.
-- **Reads are free.** A per-process snapshot cache serves every `Dials.get`
-  from memory; a throttled probe (one cheap query per interval) converges
-  other processes after a write.
+- **Every write is attributed.** `Dials.adjust_checkout_fee_bps(..., actor:
+  current_admin)` is the only write path, and it appends to a change log you
+  can render as history.
+- **Reads are free.** A per-process snapshot cache serves every read from
+  memory; a throttled probe (one cheap query per interval) converges other
+  processes after a write.
 
 ## A five-minute example
 
 ```ruby
 # config/initializers/dials.rb
 Dials.define do
-  dial :checkout_fee_bps, 250,
+  dial :checkout_fee_bps, default: 250,
        type: :integer, bounds: 1..10_000, unit: "bps",
        variants: { market: { options: %w[KE NG BD] } }
 
-  dial :signups_enabled, true, type: :boolean,
+  dial :signups_enabled, default: true, type: :boolean,
        description: "Global kill switch for signups."
 end
 ```
 
+Each declaration generates the dial's methods — read with `use_`, write with
+`adjust_`, remove an override with `clear_`:
+
 ```ruby
-Dials.get(:checkout_fee_bps, market: "KE")   # => 250   (code default)
+Dials.use_checkout_fee_bps(market: "KE")   # => 250   (code default)
 
-Dials.set(:checkout_fee_bps, 120, scope: { market: "BD" }, actor: current_admin)
-Dials.get(:checkout_fee_bps, market: "BD")   # => 120   (variation)
-Dials.get(:checkout_fee_bps, market: "KE")   # => 250   (still the default)
+Dials.adjust_checkout_fee_bps(120, actor: current_admin, market: "BD")
+Dials.use_checkout_fee_bps(market: "BD")   # => 120   (variation)
+Dials.use_checkout_fee_bps(market: "KE")   # => 250   (still the default)
 
-Dials.clear(:checkout_fee_bps, scope: { market: "BD" }, actor: current_admin)
-Dials.get(:checkout_fee_bps, market: "BD")   # => 250   (back to code)
+Dials.clear_checkout_fee_bps(actor: current_admin, market: "BD")
+Dials.use_checkout_fee_bps(market: "BD")   # => 250   (back to code)
 
 Dials.changes(key: :checkout_fee_bps)
 # => [#<ChangeRecord action="clear" actor_label="keith@..." ...>, ...]

@@ -6,7 +6,7 @@ class ScopeTest < Minitest::Test
   include DialsTestSupport
 
   def multi
-    @multi ||= Dials::Definition.new(:d, 1, type: :integer,
+    @multi ||= Dials::Definition.new(:d, default: 1, type: :integer,
                                           variants: { market: %w[KE NG], platform: %w[ios web] })
   end
 
@@ -52,7 +52,7 @@ class ScopeTest < Minitest::Test
   end
 
   def test_scope_on_variantless_dial_rejected
-    plain = Dials::Definition.new(:p, 1, type: :integer)
+    plain = Dials::Definition.new(:p, default: 1, type: :integer)
     assert_raises(Dials::InvalidScope) do
       Dials::Scope.validate!(plain, { market: "KE" }, exact: true)
     end
@@ -65,13 +65,13 @@ class ScopeTest < Minitest::Test
   end
 
   def test_open_dimension_accepts_any_nonempty_value
-    open = Dials::Definition.new(:o, 1, type: :integer, variants: [:tenant])
+    open = Dials::Definition.new(:o, default: 1, type: :integer, variants: [:tenant])
     assert_equal({ tenant: "acme" }, Dials::Scope.validate!(open, { tenant: "acme" }, exact: true))
     assert_raises(Dials::InvalidScope) { Dials::Scope.validate!(open, { tenant: "" }, exact: true) }
   end
 
   def test_open_dimension_values_are_length_capped
-    open = Dials::Definition.new(:o, 1, type: :integer, variants: [:tenant])
+    open = Dials::Definition.new(:o, default: 1, type: :integer, variants: [:tenant])
     at_limit = "a" * Dials::Dimension::MAX_VALUE_LENGTH
     assert_equal({ tenant: at_limit }, Dials::Scope.validate!(open, { tenant: at_limit }, exact: true))
     assert_raises(Dials::InvalidScope) do
@@ -80,7 +80,7 @@ class ScopeTest < Minitest::Test
   end
 
   def test_canonical_scope_is_byte_capped_for_the_indexed_column
-    two_dims = Dials::Definition.new(:t, 1, type: :integer, variants: %i[tenant region])
+    two_dims = Dials::Definition.new(:t, default: 1, type: :integer, variants: %i[tenant region])
     long = "a" * Dials::Dimension::MAX_VALUE_LENGTH
     scope = Dials::Scope.validate!(two_dims, { tenant: long, region: long }, exact: true)
     error = assert_raises(Dials::InvalidScope) { Dials::Scope.canonical(scope) }

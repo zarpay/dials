@@ -144,7 +144,7 @@ class ActiveRecordStoreTest < Minitest::Test
   end
 
   def test_json_type_round_trips_with_string_keys
-    Dials.define { dial :fee_table, { "base" => 1 }, type: :json }
+    Dials.define { dial :fee_table, default: { "base" => 1 }, type: :json }
     Dials.set(:fee_table, { "base" => 2, "tiers" => [1, 2, 3] }, actor: ACTOR)
     Dials.reload!
     assert_equal({ "base" => 2, "tiers" => [1, 2, 3] }, Dials.get(:fee_table))
@@ -267,7 +267,7 @@ class ActiveRecordStoreTest < Minitest::Test
   end
 
   def test_json_symbol_keys_rejected_at_write_time
-    Dials.define { dial :fee_table, { "base" => 1 }, type: :json }
+    Dials.define { dial :fee_table, default: { "base" => 1 }, type: :json }
     error = assert_raises(Dials::InvalidValue) { Dials.set(:fee_table, { base: 2 }, actor: ACTOR) }
     assert_match(/round-trip/, error.message)
   end

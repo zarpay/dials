@@ -10,27 +10,33 @@ that whole arc as one small library:
 ```ruby
 # config/initializers/dials.rb
 Dials.define do
-  dial :merchant_fee_bps, 100,
+  dial :merchant_fee_bps, default: 100,
        type: :integer, bounds: 1..10_000, unit: "bps",
        variants: { market: { options: %w[KE NG BD] } }
 
-  dial :signups_enabled, true, type: :boolean,
+  dial :signups_enabled, default: true, type: :boolean,
        description: "Global kill switch for new signups."
 end
 ```
 
+Each declaration generates the dial's methods:
+
 ```ruby
-Dials.get(:merchant_fee_bps, market: "KE")   # => 100 (the code default)
+Dials.use_merchant_fee_bps(market: "KE")   # => 100 (the code default)
 
-Dials.set(:merchant_fee_bps, 90, scope: { market: "KE" }, actor: current_admin)
-Dials.get(:merchant_fee_bps, market: "KE")   # => 90
-Dials.get(:merchant_fee_bps, market: "NG")   # => 100
+Dials.adjust_merchant_fee_bps(90, actor: current_admin, market: "KE")
+Dials.use_merchant_fee_bps(market: "KE")   # => 90
+Dials.use_merchant_fee_bps(market: "NG")   # => 100
 
-Dials.clear(:merchant_fee_bps, scope: { market: "KE" }, actor: current_admin)
-Dials.get(:merchant_fee_bps, market: "KE")   # => 100 again
+Dials.clear_merchant_fee_bps(actor: current_admin, market: "KE")
+Dials.use_merchant_fee_bps(market: "KE")   # => 100 again
 
-Dials.changes(key: :merchant_fee_bps)        # attributed, append-only history
+Dials.changes(key: :merchant_fee_bps)      # attributed, append-only history
 ```
+
+The key-taking primitives (`Dials.get`, `Dials.set`, `Dials.clear`) stay
+public underneath, for code that receives the key at runtime — an admin
+surface iterating the registry, a console one-liner.
 
 Resolution is always **variation → global override → code default**. The
 database stores only overrides; deleting them returns you to what the code

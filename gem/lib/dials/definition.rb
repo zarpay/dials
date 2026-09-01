@@ -19,7 +19,7 @@ module Dials
 
     attr_reader :key, :default, :type, :label, :unit, :description, :dimensions
 
-    def initialize(key, default, type:, bounds: nil, label: nil, unit: nil, description: nil, variants: nil)
+    def initialize(key, default:, type:, bounds: nil, label: nil, unit: nil, description: nil, variants: nil)
       @key = key.to_sym
       @type = type.to_sym
       @bounds = bounds
@@ -109,6 +109,12 @@ module Dials
 
       names = dimension_names
       raise InvalidDefinition, "#{key}: duplicate variant dimension" unless names.uniq.length == names.length
+
+      # Generated adjust_/clear_ methods take scope as bare keywords next to
+      # actor:, so a dimension named actor could never be passed to them.
+      if names.include?(:actor)
+        raise InvalidDefinition, "#{key}: actor is a reserved dimension name (it means attribution on every write)"
+      end
 
       if @bounds && !(@bounds.is_a?(Range) || @bounds.is_a?(Array) || @bounds.respond_to?(:call))
         raise InvalidDefinition, "#{key}: bounds must be a Range, Array, or callable"
