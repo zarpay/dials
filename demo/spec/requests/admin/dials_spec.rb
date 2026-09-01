@@ -24,7 +24,7 @@ RSpec.describe "Admin dials API", type: :request do
       fee = dials["checkout_fee_bps"]
       expect(fee["default"]).to eq(250)
       expect(fee["unit"]).to eq("bps")
-      expect(fee["dimensions"]).to eq([{ "name" => "market", "options" => %w[KE NG BD] }])
+      expect(fee["dimensions"]).to eq([{ "name" => "market", "enum" => %w[KE NG BD] }])
     end
   end
 
@@ -52,10 +52,10 @@ RSpec.describe "Admin dials API", type: :request do
       expect(Dials.changes.first.actor_label).to eq("keith@bazario.example")
     end
 
-    it "rejects out-of-bounds values as 422 with the gem's message" do
+    it "rejects schema-violating values as 422 with the gem's message" do
       put_dial(:checkout_fee_bps, { value: 0 })
       expect(response).to have_http_status(:unprocessable_content)
-      expect(response.parsed_body["error"]).to match(/within 1\.\.10000/)
+      expect(response.parsed_body["error"]).to match(/must be >= 1/)
     end
 
     it "rejects invalid scopes as 422" do

@@ -24,10 +24,11 @@ end
 Dials.define do
   dial :checkout_fee_bps, default: 250,
        type: :integer,
-       bounds: 1..10_000,
+       minimum: 1,
+       maximum: 10_000,
        unit: "bps",
        description: "Fee charged on checkout, in basis points.",
-       variants: { market: { options: %w[KE NG BD] } }
+       variants: { market: { enum: %w[KE NG BD] } }
 
   dial :signups_enabled, default: true,
        type: :boolean,
@@ -41,9 +42,18 @@ Each `dial` takes a key and:
 |---|---|
 | `default:` | the **code default** — what the dial serves until an operator overrides it |
 | `type:` | `:boolean`, `:integer`, `:float`, `:string`, or `:json` |
-| `bounds:` | optional — a `Range`, an `Array` of allowed values, or a callable |
+| *constraints* | optional JSON Schema keywords for the type — `minimum:`/`maximum:` for numbers, `min_length:`/`max_length:`/`pattern:` for strings, `enum:` for any type, `properties:`/`required:` for `:json` |
+| `validate:` | optional callable — the escape hatch for rules a schema cannot express |
 | `variants:` | optional — the dial's variant dimensions (see below) |
 | `label:` / `unit:` / `description:` | metadata for the admin surface you build |
+
+The constraints are deliberately not a bespoke vocabulary: they are **JSON
+Schema keywords**, snake_cased for Ruby. If you've written `minimum` /
+`maximum` / `enum` / `pattern` in a JSON Schema or an OpenAPI spec, you
+already know this API — and because the constraints are the standard's, a
+declaration can hand its rules to any JSON Schema tooling via
+`definition.to_json_schema` (see the
+[API Reference](/reference/api#constraints)).
 
 A dial with no `variants:` is **global-only**: it can never hold per-scope
 values, which is exactly what you want for a kill switch.
@@ -82,7 +92,7 @@ Dials.clear_checkout_fee_bps(actor: current_admin)
 
 `actor:` is required on every write — there is no anonymous mutation path.
 (That is also why `actor` is a reserved dimension name.) Values are validated
-against the declared type and bounds before anything is stored.
+against the declared type and schema before anything is stored.
 
 ## Dynamic access
 
@@ -124,7 +134,7 @@ See [Testing with Dials](/guides/testing) for why.
 
 - [The Dial Model](/concepts/the-dial-model) — the resolution layers and why
   the database stores only overrides
-- [Variants and Scopes](/concepts/variants-and-scopes) — dimensions, options,
+- [Variants and Scopes](/concepts/variants-and-scopes) — dimensions, enums,
   and the exact-scope rule
 - [Retrofit a Constant](/guides/retrofit-a-constant) — adopting dials in an
   existing app

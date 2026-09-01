@@ -2,9 +2,21 @@
 
 ## [Unreleased]
 
+- **Breaking: constraints now speak JSON Schema; `bounds:` is gone.**
+  Declarations take the standard's keywords directly (snake_cased):
+  `minimum:`/`maximum:`/`exclusive_minimum:`/`exclusive_maximum:`/
+  `multiple_of:` for numbers, `min_length:`/`max_length:`/`pattern:` for
+  strings, `enum:` for any type, and `properties:`/`required:` for `:json`
+  objects (nested schemas support `items:` for arrays and must declare a
+  `type:`). Keywords are checked against the dial's type at boot; declaring
+  `properties:`/`required:` pins a `:json` dial to JSON objects. Dimension
+  `options:` is renamed `enum:` (same vocabulary everywhere), `validate:` (a
+  callable) replaces callable bounds as the escape hatch for rules a schema
+  cannot express, and `Definition#to_json_schema` emits the declaration as a
+  real JSON Schema fragment for admin surfaces and agents.
 - **Breaking: `default:` is now a keyword argument in declarations.** The
   dial key is the only positional argument:
-  `dial :checkout_fee_bps, default: 250, type: :integer, bounds: 1..10_000`.
+  `dial :checkout_fee_bps, default: 250, type: :integer, minimum: 1, maximum: 10_000`.
   The bare positional value was the one unlabeled thing in an otherwise
   fully-named declaration.
 - **Generated per-dial methods are now the primary API.** Declaring

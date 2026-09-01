@@ -3,7 +3,7 @@ layout: home
 hero:
   name: dials
   text: Constants you can turn without a deploy
-  tagline: Declare a value in code with a default, a type, and bounds. Override it at runtime. Vary it per market, per platform, per anything. Every change attributed, every read cached.
+  tagline: Declare a value in code with a default, a type, and a schema. Override it at runtime. Vary it per market, per platform, per anything. Every change attributed, every read cached.
   actions:
     - theme: brand
       text: Start with Quick Start
@@ -34,11 +34,13 @@ changed this and what values are safe?"
 
 Dials is that whole arc, designed once:
 
-- **Declarations stay in code.** A dial's default, type, bounds, and variant
-  dimensions are Ruby, reviewed in PRs — the database stores only overrides.
+- **Declarations stay in code.** A dial's default, type, constraints, and
+  variant dimensions are Ruby, reviewed in PRs — the database stores only
+  overrides. Constraints speak JSON Schema (`minimum:`, `enum:`,
+  `pattern:`, ...), so they're declarative data an admin surface can render.
 - **Resolution is one rule.** `variation → global override → code default`,
   always. Delete every override and you are back to exactly what the code says.
-- **Variants are first-class.** `variants: { market: { options: %w[KE NG BD] } }`
+- **Variants are first-class.** `variants: { market: { enum: %w[KE NG BD] } }`
   arms a dial for per-market values; the gem validates every scope against
   the declaration.
 - **Every write is attributed.** `Dials.adjust_checkout_fee_bps(..., actor:
@@ -54,8 +56,8 @@ Dials is that whole arc, designed once:
 # config/initializers/dials.rb
 Dials.define do
   dial :checkout_fee_bps, default: 250,
-       type: :integer, bounds: 1..10_000, unit: "bps",
-       variants: { market: { options: %w[KE NG BD] } }
+       type: :integer, minimum: 1, maximum: 10_000, unit: "bps",
+       variants: { market: { enum: %w[KE NG BD] } }
 
   dial :signups_enabled, default: true, type: :boolean,
        description: "Global kill switch for signups."

@@ -6,12 +6,12 @@ this gem generalized it. These are the decisions that survived, and why.
 
 ## Declarations in code, values in the database
 
-The registry (keys, types, bounds, dimensions, labels) is Ruby in an
+The registry (keys, types, constraints, dimensions, labels) is Ruby in an
 initializer; the database stores only override values. Consequences we
 wanted: dial changes to *what can be configured* go through code review and
 git history; dial changes to *values* go through the attributed runtime
-path. A database-defined registry would make "what are the bounds of this
-dial?" a runtime question with no reviewer, and bounds-as-data can't hold a
+path. A database-defined registry would make "what may this dial hold?" a
+runtime question with no reviewer, and constraints-as-database-rows can't hold a
 lambda.
 
 ## Overrides, not seeds
@@ -110,6 +110,35 @@ Three properties keep the dynamic layer honest:
 - Scope travels as bare keywords on the generated forms, so **`actor` is a
   reserved dimension name** — on a write it must always mean attribution.
 
+## Constraints speak JSON Schema
+
+Value constraints use JSON Schema's keyword vocabulary, snake_cased for Ruby
+(`minimum:`, `maximum:`, `enum:`, `pattern:`, `properties:`/`required:`), in
+place of an earlier bespoke `bounds:` slot (Range / Array / callable). Three
+reasons, in order of weight:
+
+- **Constraints become data, not code.** A callable bound is a black box: an
+  admin surface can render nothing from `#<Proc>`, and its failure message is
+  generic. Named keywords render as UI affordances, produce specific error
+  messages, and serialize — `Definition#to_json_schema` hands any client-side
+  validator (or an agent reading the catalog) the real rules.
+- **Extension is pre-decided.** The next constraint someone needs already has
+  a name with settled semantics in the standard. Borrowing the vocabulary
+  wholesale means no bespoke naming decisions as the API grows, and the words
+  are already familiar to humans and agents alike.
+- **The value model already was JSON.** Dial types map onto JSON Schema types
+  (`:float` → `number`), and every stored value round-trips through JSON by
+  design — the constraint language now matches the value language.
+
+Two deliberate divergences from the standard, both toward boot-time
+strictness: keywords are validated against the dial's type at declaration
+(JSON Schema silently ignores keywords on mismatched types — exactly the
+silent-nothing this gem's boot checks exist to prevent), and declaring
+`properties:`/`required:` pins a `:json` dial's values to objects. A
+`validate:` callable remains as the explicitly non-serializable escape hatch,
+and dimension `options:` became `enum:` so the whole declaration speaks one
+vocabulary.
+
 ## No bundled GUI
 
 The original system's dashboard was a bespoke Rails controller with CAS
@@ -140,24 +169,24 @@ out for free: no declaration, no variations, no flag.
 
 ## Validation happens at write time, not read time
 
-Type and bounds are enforced when a value is stored (and on every code
+Type and schema are enforced when a value is stored (and on every code
 default at boot). Already-stored values are **not** re-validated on read:
-if a deploy narrows a dial's bounds from `0..1000` to `0..100`, a stored
+if a deploy narrows a dial's schema from `maximum: 1000` to `maximum: 100`, a stored
 `900` keeps serving until an operator changes it. This is deliberate.
 Read-time enforcement has no good failure mode — rejecting the stored value
 mid-request means either raising (an incident caused by a deploy that
 changed no values) or silently substituting the default (exactly the kind
 of guess this gem refuses to make). The honest contract: narrowing a
-declaration is a migration, and the deploy that narrows bounds should check
-`Dials.changes` / the stored overrides for now-out-of-bounds values and fix
+declaration is a migration, and the deploy that narrows a schema should check
+`Dials.changes` / the stored overrides for now-invalid values and fix
 them explicitly. What read-time *does* defend is robustness, not policy:
 rows corrupted around the gem are quarantined with a warning rather than
 taking down every dial read.
 
 ## Errors, not fallbacks, at the boundaries
 
-Unknown dial, missing dimension, unknown dimension, out-of-options value,
-out-of-bounds write, nil value, missing actor — all raise typed errors
+Unknown dial, missing dimension, unknown dimension, out-of-enum value,
+schema-violating write, nil value, missing actor — all raise typed errors
 immediately. The only silent path is the happy one (no override → next layer
 down). A configuration system that guesses at what you meant is a
 configuration system you cannot trust during an incident.

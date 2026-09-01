@@ -38,17 +38,19 @@ end
 Dials.define do
   dial :checkout_fee_bps, default: 250,
        type: :integer,
-       bounds: 1..10_000,
+       minimum: 1,
+       maximum: 10_000,
        unit: "bps",
        description: "Fee charged on checkout, in basis points of the order total.",
-       variants: { market: { options: markets } }
+       variants: { market: { enum: markets } }
 
   dial :free_delivery_threshold, default: 5_000,
        type: :integer,
-       bounds: 0..1_000_000,
+       minimum: 0,
+       maximum: 1_000_000,
        unit: "cents",
        description: "Order totals at or above this ship free.",
-       variants: { market: { options: markets }, platform: { options: platforms } }
+       variants: { market: { enum: markets }, platform: { enum: platforms } }
 
   dial :signups_enabled, default: true,
        type: :boolean,
@@ -57,11 +59,15 @@ Dials.define do
 
   dial :support_email, default: "support@bazario.example",
        type: :string,
-       bounds: ->(value) { value.match?(URI::MailTo::EMAIL_REGEXP) },
+       pattern: URI::MailTo::EMAIL_REGEXP,
+       max_length: 254,
        description: "Reply-to address shown across the product."
 
   dial :welcome_banner, default: { "headline" => "Welcome to Bazario", "cta" => "Start shopping" },
        type: :json,
+       properties: { "headline" => { type: :string, min_length: 1 },
+                     "cta" => { type: :string, min_length: 1 } },
+       required: %w[headline cta],
        description: "Structured homepage banner copy.",
        variants: { locale: {} } # open dimension: any non-empty locale string
 end

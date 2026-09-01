@@ -23,7 +23,8 @@ end
 Dials.define do
   dial :checkout_fee_bps, default: 250,
        type: :integer,
-       bounds: 1..10_000,
+       minimum: 1,
+       maximum: 10_000,
        unit: "bps",
        description: "Fee charged on checkout, in basis points."
 end
@@ -32,9 +33,9 @@ end
 No `variants:` yet — this dial is global-only until something reads a varied
 value ([the arming gate](/concepts/variants-and-scopes)).
 
-Choose `bounds:` now, while you're thinking about it. Bounds are the
-difference between "operator typo'd 25000" being a validation error and
-being an incident.
+Choose the constraints now, while you're thinking about it — `minimum:` and
+`maximum:` are the difference between "operator typo'd 25000" being a
+validation error and being an incident.
 
 ## Step 2 — replace the constant read
 
@@ -60,8 +61,8 @@ When the BD market needs a different fee, one PR does both halves:
 ```ruby
 # The arming diff — visible in review:
 dial :checkout_fee_bps, default: 250,
-     type: :integer, bounds: 1..10_000, unit: "bps",
-     variants: { market: { options: %w[KE NG BD] } }
+     type: :integer, minimum: 1, maximum: 10_000, unit: "bps",
+     variants: { market: { enum: %w[KE NG BD] } }
 ```
 
 ```ruby

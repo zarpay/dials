@@ -7,9 +7,14 @@ module Dials
   #
   # type::   :boolean, :integer, :float, :string, or :json (any
   #          JSON-serializable structure).
-  # bounds:: optional constraint on top of the type — a Range (`1..10_000`),
-  #          an Array of allowed values (`%w[low medium high]`), or a callable
-  #          returning truthy when the value is storable.
+  # constraints:: optional keywords on top of the type, in JSON Schema's
+  #          vocabulary — `minimum: 1, maximum: 10_000`, `enum: %w[low high]`,
+  #          `pattern: /.../`, `properties:`/`required:` for :json objects.
+  #          See Schema for the full keyword set per type.
+  # validate:: optional callable returning truthy when a value is storable —
+  #          the escape hatch for rules a schema cannot express. Unlike the
+  #          schema keywords it cannot be rendered or serialized; prefer the
+  #          keywords whenever they can say it.
   # variants:: the dial's variant dimensions. Declaring variants is the
   #          arming gate: a dial with none is global-only by construction,
   #          and adding the declaration belongs in the same change as the
@@ -17,15 +22,21 @@ module Dials
   class Definition
     TYPES = %i[boolean integer float string json].freeze
 
-    attr_reader :key, :default, :type, :label, :unit, :description, :dimensions
+    attr_reader :key, :default, :type, :label, :unit, :description, :dimensions, :schema
 
-    def initialize(key, default:, type:, bounds: nil, label: nil, unit: nil, description: nil, variants: nil)
+    def initialize(key, default:, type:, label: nil, unit: nil, description: nil,
+                   variants: nil, validate: nil, **constraints)
       @key = key.to_sym
       @type = type.to_sym
-      @bounds = bounds
       @label = label || @key.to_s.tr("_", " ").capitalize
       @unit = unit
       @description = description
+      @validate = validate
+
+      # Type first: Schema derives its allowed keywords from it.
+      raise InvalidDefinition, "#{@key}: unknown type #{@type.inspect} (use one of #{TYPES.join(', ')})" unless TYPES.include?(@type)
+
+      @schema = Schema.new(@key, @type, constraints)
       @dimensions = build_dimensions(variants)
       @default = default
 
@@ -50,16 +61,32 @@ module Dials
       dimensions.map(&:name)
     end
 
+    # The declaration as a JSON Schema fragment — what an admin surface (or
+    # an agent reading the dial catalog) needs to render inputs and validate
+    # client-side. A `validate:` callable is not representable and is simply
+    # absent; the server-side check still runs on every write.
+    def to_json_schema
+      out = {}
+      out["type"] = json_schema_type if json_schema_type
+      out["title"] = label
+      out["description"] = description if description
+      out.merge!(schema.to_json_schema)
+      out["default"] = default
+      out
+    end
+
     # Validation problems for a candidate stored value; [] when storable.
-    # `nil` is never storable — removing an override is `Dials.clear`, so a
-    # stored nil could only ever be an accident.
+    # `nil` is never storable — removing an override is a clear, so a stored
+    # nil could only ever be an accident.
     def problems_for(value)
       return ["cannot be nil (use clear to remove an override)"] if value.nil?
 
       problem = type_problem(value)
       return [problem] if problem
 
-      bounds_problems(value)
+      problems = schema.problems_for(value)
+      problems << "fails its validate check" if @validate && !@validate.call(value)
+      problems
     end
 
     def validate_value!(value)
@@ -71,42 +98,48 @@ module Dials
 
     private
 
+    def json_schema_type
+      case type
+      when :float then "number"
+      when :json then schema.object? ? "object" : nil
+      else type.to_s
+      end
+    end
+
     def build_dimensions(variants)
       case variants
       when nil then [].freeze
       when Array
         variants.map { |name| Dimension.new(name) }.freeze
       when Hash
-        variants.map { |name, spec| Dimension.new(name, options: dimension_options(name, spec)) }.freeze
+        variants.map { |name, spec| Dimension.new(name, enum: dimension_enum(name, spec)) }.freeze
       else
         raise InvalidDefinition, "#{key}: variants must be a Hash or Array, got #{variants.class}"
       end
     end
 
-    # Strict on shape: a typo like `{ "options" => [...] }` (string key) or
+    # Strict on shape: a typo like `{ "enum" => [...] }` (string key) or
     # `{ market: "KE" }` must raise, not silently become an OPEN dimension
     # that accepts any value.
-    def dimension_options(name, spec)
+    def dimension_enum(name, spec)
       case spec
       when nil then nil
       when Hash
-        unknown = spec.keys - [:options]
+        unknown = spec.keys - [:enum]
         unless unknown.empty?
           raise InvalidDefinition,
-                "#{key}: dimension #{name} has unknown keys #{unknown.inspect} (use options: with a symbol key)"
+                "#{key}: dimension #{name} has unknown keys #{unknown.inspect} (use enum: with a symbol key)"
         end
-        spec[:options]
+        spec[:enum]
       when Array then spec
       else
         return spec if spec.respond_to?(:call)
 
-        raise InvalidDefinition, "#{key}: dimension #{name} spec must be an Array, a callable, or { options: ... }"
+        raise InvalidDefinition, "#{key}: dimension #{name} spec must be an Array, a callable, or { enum: ... }"
       end
     end
 
     def validate_definition!
-      raise InvalidDefinition, "#{key}: unknown type #{type.inspect} (use one of #{TYPES.join(', ')})" unless TYPES.include?(type)
-
       names = dimension_names
       raise InvalidDefinition, "#{key}: duplicate variant dimension" unless names.uniq.length == names.length
 
@@ -116,8 +149,8 @@ module Dials
         raise InvalidDefinition, "#{key}: actor is a reserved dimension name (it means attribution on every write)"
       end
 
-      if @bounds && !(@bounds.is_a?(Range) || @bounds.is_a?(Array) || @bounds.respond_to?(:call))
-        raise InvalidDefinition, "#{key}: bounds must be a Range, Array, or callable"
+      if @validate && !@validate.respond_to?(:call)
+        raise InvalidDefinition, "#{key}: validate must be a callable"
       end
 
       problems = problems_for(default)
@@ -162,18 +195,6 @@ module Dials
       "must round-trip through JSON unchanged (use string keys and JSON-native types)"
     rescue StandardError
       "must be JSON-serializable"
-    end
-
-    def bounds_problems(value)
-      case @bounds
-      when nil then []
-      when Range
-        @bounds.cover?(value) ? [] : ["must be within #{@bounds}"]
-      when Array
-        @bounds.include?(value) ? [] : ["must be one of #{@bounds.inspect}"]
-      else
-        @bounds.call(value) ? [] : ["is out of bounds"]
-      end
     end
   end
 end

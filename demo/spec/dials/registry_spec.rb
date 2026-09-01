@@ -4,7 +4,7 @@ require "rails_helper"
 
 # The registry-integrity spec: pins exactly which dials this app declares and
 # which of them are armed for variation. Adding a dial, adding variants to a
-# dial, or widening a dimension's options makes this spec fail — which is the
+# dial, or widening a dimension's enum makes this spec fail — which is the
 # point: those changes deserve a visible, reviewed diff, because each one
 # changes what operators can do in production.
 RSpec.describe "Dial registry", type: :model do
@@ -31,12 +31,12 @@ RSpec.describe "Dial registry", type: :model do
     expect(Dials.registry.fetch(:signups_enabled).variants?).to be(false)
   end
 
-  it "pins market and platform options" do
+  it "pins market and platform enums" do
     fee = Dials.registry.fetch(:checkout_fee_bps)
-    expect(fee.dimensions.first.options).to eq(%w[KE NG BD])
+    expect(fee.dimensions.first.enum).to eq(%w[KE NG BD])
 
     delivery = Dials.registry.fetch(:free_delivery_threshold)
-    expect(delivery.dimensions.map(&:options)).to eq([%w[KE NG BD], %w[ios android web]])
+    expect(delivery.dimensions.map(&:enum)).to eq([%w[KE NG BD], %w[ios android web]])
   end
 
   it "gives every dial a description (operators read these)" do

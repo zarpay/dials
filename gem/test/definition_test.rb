@@ -23,7 +23,7 @@ class DefinitionTest < Minitest::Test
 
   def test_default_must_satisfy_own_rules
     assert_raises(Dials::InvalidDefinition) { build(:fee, "ten", type: :integer) }
-    assert_raises(Dials::InvalidDefinition) { build(:fee, 0, type: :integer, bounds: 1..100) }
+    assert_raises(Dials::InvalidDefinition) { build(:fee, 0, type: :integer, minimum: 1) }
     assert_raises(Dials::InvalidDefinition) { build(:fee, nil, type: :integer) }
   end
 
@@ -93,63 +93,57 @@ class DefinitionTest < Minitest::Test
 
   def test_malformed_dimension_specs_raise_instead_of_becoming_open
     # String key: a typo must not silently mean "accepts anything".
-    assert_raises(Dials::InvalidDefinition) { build(variants: { market: { "options" => %w[KE NG] } }) }
-    # Scalar spec: not a valid options shape.
+    assert_raises(Dials::InvalidDefinition) { build(variants: { market: { "enum" => %w[KE NG] } }) }
+    # Scalar spec: not a valid enum shape.
     assert_raises(Dials::InvalidDefinition) { build(variants: { market: "KE" }) }
     # Unknown option keys.
     assert_raises(Dials::InvalidDefinition) { build(variants: { market: { choices: %w[KE] } }) }
     # Deliberately open stays expressible.
-    assert_nil build(variants: { market: {} }).dimensions.first.options
-    assert_nil build(variants: { market: nil }).dimensions.first.options
+    assert_nil build(variants: { market: {} }).dimensions.first.enum
+    assert_nil build(variants: { market: nil }).dimensions.first.enum
   end
 
-  def test_range_bounds
-    definition = build(bounds: 1..100)
-    assert_equal 100, definition.validate_value!(100)
-    assert_raises(Dials::InvalidValue) { definition.validate_value!(101) }
-  end
-
-  def test_array_bounds
-    definition = build(:mode, "slow", type: :string, bounds: %w[slow fast])
-    assert_equal "fast", definition.validate_value!("fast")
-    assert_raises(Dials::InvalidValue) { definition.validate_value!("medium") }
-  end
-
-  def test_callable_bounds
-    definition = build(bounds: lambda(&:even?))
+  def test_callable_validate_escape_hatch
+    definition = build(validate: lambda(&:even?))
     assert_equal 4, definition.validate_value!(4)
-    assert_raises(Dials::InvalidValue) { definition.validate_value!(3) }
+    error = assert_raises(Dials::InvalidValue) { definition.validate_value!(3) }
+    assert_match(/fails its validate check/, error.message)
   end
 
-  def test_bad_bounds_shape_raises
-    assert_raises(Dials::InvalidDefinition) { build(bounds: "1-100") }
+  def test_validate_must_be_callable
+    assert_raises(Dials::InvalidDefinition) { build(validate: "even") }
+  end
+
+  def test_bounds_is_gone_with_a_pointer_to_the_schema_keywords
+    error = assert_raises(Dials::InvalidDefinition) { build(bounds: 1..100) }
+    assert_match(/JSON Schema keywords/, error.message)
   end
 
   def test_default_label_from_key
     assert_equal "Merchant fee bps", build(:merchant_fee_bps).label
   end
 
-  def test_variants_hash_with_options
-    definition = build(variants: { market: { options: %w[KE NG] } })
+  def test_variants_hash_with_enum
+    definition = build(variants: { market: { enum: %w[KE NG] } })
     assert definition.variants?
     assert_equal [:market], definition.dimension_names
-    assert_equal %w[KE NG], definition.dimensions.first.options
+    assert_equal %w[KE NG], definition.dimensions.first.enum
   end
 
   def test_variants_shorthand_array_of_names
     definition = build(variants: %i[market platform])
     assert_equal %i[market platform], definition.dimension_names
-    assert_nil definition.dimensions.first.options
+    assert_nil definition.dimensions.first.enum
   end
 
-  def test_variants_shorthand_options_array
+  def test_variants_shorthand_enum_array
     definition = build(variants: { market: %w[KE NG] })
-    assert_equal %w[KE NG], definition.dimensions.first.options
+    assert_equal %w[KE NG], definition.dimensions.first.enum
   end
 
-  def test_variants_callable_options_resolved_lazily
+  def test_variants_callable_enum_resolved_lazily
     calls = 0
-    definition = build(variants: { market: { options: lambda {
+    definition = build(variants: { market: { enum: lambda {
       calls += 1
       %w[KE]
     } } })

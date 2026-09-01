@@ -2,7 +2,7 @@
 
 The second adoption path: your app already built the middle of the arc — a
 `settings` / `system_configs`-style table with an admin form — and it's
-straining (no types, no bounds, no variants, sentinel rows, unclear
+straining (no types, no constraints, no variants, sentinel rows, unclear
 history). This guide migrates values *out* of that table into dials.
 
 Before starting, sort each row in the legacy table into one of three buckets:
@@ -15,7 +15,7 @@ Flow-through semantics, one value, operator-owned. These migrate.
 
 ```ruby
 dial :graduation_window_hours, default: 24,   # ← what production serves today
-     type: :integer, bounds: 0..8_760,
+     type: :integer, minimum: 0, maximum: 8_760,
      description: "Hours before a waitlisted signup auto-graduates."
 ```
 
@@ -54,8 +54,8 @@ untangles the sentinel:
 
 ```ruby
 # The sentinel row becomes the global; real countries become variations.
-dial :graduation_window_hours, default: 24, type: :integer, bounds: 0..8_760,
-     variants: { market: { options: MARKETS } }
+dial :graduation_window_hours, default: 24, type: :integer, minimum: 0, maximum: 8_760,
+     variants: { market: { enum: MARKETS } }
 ```
 
 ```ruby

@@ -73,7 +73,7 @@ module Admin
         unit: definition.unit,
         description: definition.description,
         default: definition.default,
-        dimensions: definition.dimensions.map { |d| { name: d.name, options: d.options } }
+        dimensions: definition.dimensions.map { |d| { name: d.name, enum: d.enum } }
       }
     end
   end

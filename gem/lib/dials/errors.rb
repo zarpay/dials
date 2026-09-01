@@ -13,12 +13,12 @@ module Dials
   class DuplicateDial < Error; end
 
   # Raised when a definition itself is malformed (bad type, bad variants
-  # shape, default that fails its own bounds). Definitions fail at boot, not
-  # at first read in production.
+  # shape, unknown schema keyword, default that fails its own schema).
+  # Definitions fail at boot, not at first read in production.
   class InvalidDefinition < Error; end
 
   # Raised when a candidate value is not storable for its dial: wrong type,
-  # out of bounds, or nil (nil is never a value — use clear to remove an
+  # schema violation, or nil (nil is never a value — use clear to remove an
   # override).
   class InvalidValue < Error; end
 

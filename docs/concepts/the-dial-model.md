@@ -18,7 +18,7 @@ else in the gem exists to keep this rule honest.
 This is the load-bearing decision. When you declare
 
 ```ruby
-dial :checkout_fee_bps, default: 250, type: :integer, bounds: 1..10_000
+dial :checkout_fee_bps, default: 250, type: :integer, minimum: 1, maximum: 10_000
 ```
 
 **no row is written anywhere**. The default lives in code, under code review,
@@ -94,8 +94,8 @@ gem, including the HTTP layer of the demo app (Rails'
 
 ## Declarations are validated at boot
 
-A `dial` declaration whose default violates its own type or bounds raises
+A `dial` declaration whose default violates its own type or schema raises
 `Dials::InvalidDefinition` when the initializer runs — the app fails to
 boot. A dial that can be declared can be trusted: whatever resolution
-returns, it satisfies the declared type and bounds, because both writes and
+returns, it satisfies the declared type and schema, because both writes and
 defaults pass the same validation.

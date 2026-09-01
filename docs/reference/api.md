@@ -7,12 +7,12 @@
 Runs the block against the registry. Blocks accumulate; a duplicate key
 raises `Dials::DuplicateDial` at boot.
 
-### `dial(key, default:, type:, bounds: nil, label: nil, unit: nil, description: nil, variants: nil)`
+### `dial(key, default:, type:, label: nil, unit: nil, description: nil, variants: nil, validate: nil, **constraints)`
 
 Declares one dial (inside a `define` block). Raises
-`Dials::InvalidDefinition` at boot when the declaration is malformed, the
-default fails its own type/bounds, or a generated method name is already
-taken.
+`Dials::InvalidDefinition` at boot when the declaration is malformed, a
+constraint keyword doesn't apply to the type, the default fails its own
+schema, or a generated method name is already taken.
 
 Each declaration generates the dial's three methods on `Dials`:
 `use_<key>`, `adjust_<key>`, `clear_<key>` (see below). They are defined at
@@ -23,17 +23,52 @@ declaration time — real methods, not `method_missing`.
 | `key` | Symbol/String | unique across the app; the only positional argument |
 | `default:` | value | the code default; validated like any stored value |
 | `type:` | Symbol | `:boolean` `:integer` `:float` `:string` `:json` |
-| `bounds:` | Range, Array, or callable | optional; callable returns truthy for storable |
 | `label:` | String | defaults to the humanized key |
 | `unit:` | String | display metadata (`"bps"`, `"cents"`, `"hours"`) |
 | `description:` | String | shown on admin surfaces; write one |
 | `variants:` | Hash or Array | variant dimensions; see below |
+| `validate:` | callable | escape hatch for rules a schema cannot express; returns truthy for storable. Not serializable — prefer the schema keywords |
+| *constraints* | keywords | value constraints in JSON Schema's vocabulary; see below |
+
+### Constraints
+
+Constraints are JSON Schema keywords, snake_cased for Ruby, passed directly
+on `dial`. Each keyword is checked against the dial's type at boot — a
+`pattern:` on an `:integer` dial raises `InvalidDefinition`, not nothing.
+
+| Keyword | Applies to | Meaning |
+|---|---|---|
+| `enum:` | any type | non-empty Array of allowed values |
+| `minimum:` / `maximum:` | `:integer` `:float` | inclusive bounds |
+| `exclusive_minimum:` / `exclusive_maximum:` | `:integer` `:float` | exclusive bounds |
+| `multiple_of:` | `:integer` `:float` | must divide the value exactly |
+| `min_length:` / `max_length:` | `:string` | length in characters |
+| `pattern:` | `:string` | Regexp (or String compiled to one); must match |
+| `properties:` | `:json` | Hash of key => nested schema; see below |
+| `required:` | `:json` | Array of keys that must be present |
+
+```ruby
+dial :checkout_fee_bps, default: 250, type: :integer, minimum: 1, maximum: 10_000
+dial :tier, default: "low", type: :string, enum: %w[low medium high]
+dial :support_email, default: "support@x.co", type: :string,
+     pattern: URI::MailTo::EMAIL_REGEXP, max_length: 254
+dial :welcome_banner, default: { "headline" => "Hi", "cta" => "Go" }, type: :json,
+     properties: { "headline" => { type: :string, min_length: 1 },
+                   "cta" => { type: :string } },
+     required: %w[headline cta]
+```
+
+Nested schemas (inside `properties:`, and `items:` for arrays) must declare
+a `type:` — one of `:boolean` `:integer` `:number` `:string` `:object`
+`:array` (JSON Schema's own type names) — plus that type's keywords.
+Declaring `properties:`/`required:` pins a `:json` dial's values to JSON
+objects; keys not named in `properties:` are allowed.
 
 `variants:` shapes, all equivalent where applicable:
 
 ```ruby
-variants: { market: { options: %w[KE NG BD] } }   # canonical
-variants: { market: %w[KE NG BD] }                # shorthand: options array
+variants: { market: { enum: %w[KE NG BD] } }      # canonical
+variants: { market: %w[KE NG BD] }                # shorthand: enum array
 variants: { market: -> { Market.pluck(:code) } }  # callable, resolved lazily
 variants: { locale: {} }                          # open: any non-empty string
 variants: [:market, :platform]                    # names only, all open
@@ -75,9 +110,25 @@ Dials.registry.defined?(:key)       # true/false
 definition.key .default .type .label .unit .description
 definition.variants?                # any dimensions?
 definition.dimension_names          # [:market, :platform]
-definition.dimensions               # [Dimension(name, options), ...]
+definition.dimensions               # [Dimension(name, enum), ...]
 definition.problems_for(value)      # [] when storable, else messages
+definition.to_json_schema           # JSON Schema fragment; see below
 ```
+
+### `Definition#to_json_schema → Hash`
+
+The declaration as a JSON Schema fragment — camelCase keywords, `pattern` as
+its regexp source, `title`/`description`/`default` included — ready for a
+client-side validator or an agent reading the dial catalog:
+
+```ruby
+Dials.registry.fetch(:checkout_fee_bps).to_json_schema
+# => { "type" => "integer", "title" => "Checkout fee bps",
+#      "minimum" => 1, "maximum" => 10_000, "default" => 250, ... }
+```
+
+A `validate:` callable is not representable and is simply absent from the
+output; the server-side check still runs on every write.
 
 ## Writing
 
@@ -91,7 +142,7 @@ Dials.adjust_checkout_fee_bps(120, actor: current_admin, market: "BD")  # variat
 ```
 
 Stores an override — global with no scope keywords, a variation with them.
-Validates type, bounds, and scope; requires `actor:` (which is why `actor`
+Validates type, schema, and scope; requires `actor:` (which is why `actor`
 is a reserved dimension name). Appends to the change log and busts the local
 cache. Raises `Dials::InvalidValue`, `Dials::InvalidScope`,
 `Dials::MissingActor`.
@@ -163,6 +214,6 @@ All inherit `Dials::Error`:
 | `UnknownDial` | read/write of an undeclared key |
 | `DuplicateDial` | a key declared twice |
 | `InvalidDefinition` | malformed declaration (boot-time) |
-| `InvalidValue` | wrong type, out of bounds, or nil on write/pin |
+| `InvalidValue` | wrong type, schema violation, or nil on write/pin |
 | `InvalidScope` | wrong/missing/unknown dimensions or values |
 | `MissingActor` | write without `actor:` |

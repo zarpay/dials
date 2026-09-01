@@ -28,15 +28,16 @@ def index
       unit: definition.unit,
       description: definition.description,
       default: definition.default,
-      dimensions: definition.dimensions.map { |d| { name: d.name, options: d.options } }
+      dimensions: definition.dimensions.map { |d| { name: d.name, enum: d.enum } }
     }
   }
 end
 ```
 
 The registry tells your UI everything: what dials exist, what inputs to
-render (type), what to validate client-side (bounds live server-side; render
-`options` as selects), and what to label things. There is no "dial CRUD" —
+render (type), what to validate client-side (each definition's
+`to_json_schema` feeds any JSON Schema validator; the server re-checks; render
+`enum` values as selects), and what to label things. There is no "dial CRUD" —
 dials are created in code, so the surface only edits *values*.
 
 For each dial, show the resolved value per scope so operators see the

@@ -13,7 +13,7 @@ YAML — with typed fields declared in code and a read-only web UI.
 - **Its problem**: *deploy/environment configuration* — values that differ by
   environment and change with deploys, unified behind one API.
 - **What it lacks for the dials problem**: variant dimensions (its only axis
-  is the Rails environment), write attribution, bounds with teeth, and a
+  is the Rails environment), write attribution, validation with teeth, and a
   first-class override/clear model.
 - **What dials lacks for its problem**: ENV and YAML layers, deliberately —
   a dial changing per-environment via ENV would undermine "the change log is
@@ -29,7 +29,7 @@ relative: database-backed runtime settings, editable UI, change history,
 and a polling cache (its design validated ours). Differences that matter:
 
 - **Registry**: super_settings' settings are *created at runtime* in the UI;
-  dials must be *declared in code* — key, type, bounds, dimensions — so
+  dials must be *declared in code* — key, type, constraints, dimensions — so
   review owns the shape and the value can't outlive its reader.
 - **Variants**: super_settings has one value per key; per-market values
   land you back in key-naming conventions (`fee_bps_ke`, `fee_bps_ng`) with
@@ -60,7 +60,7 @@ detail.
 
 The default alternative, because it's an afternoon's work. The afternoon
 buys the middle of the arc; the years buy the rest piecemeal and under
-incident pressure: type casting, bounds, `false` vs `NULL`, per-market rows
+incident pressure: type casting, value constraints, `false` vs `NULL`, per-market rows
 and their sentinel, fallback reads, cache invalidation across processes,
 attribution, and "who changed this at 3am". Dials is that list, done once,
 with the sharp edges named and tested.

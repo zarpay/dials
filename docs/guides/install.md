@@ -32,9 +32,9 @@ end
 
 Dials.define do
   dial :checkout_fee_bps, default: 250,
-       type: :integer, bounds: 1..10_000, unit: "bps",
+       type: :integer, minimum: 1, maximum: 10_000, unit: "bps",
        description: "Fee charged on checkout, in basis points.",
-       variants: { market: { options: %w[KE NG BD] } }
+       variants: { market: { enum: %w[KE NG BD] } }
 end
 ```
 
@@ -43,8 +43,8 @@ domain) — they accumulate, and a duplicate key raises at boot.
 
 A plain initializer is the right home: the registry holds only strings,
 numbers, and lambdas, so it does not touch autoloaded constants and is safe
-across code reloading. If a dimension's options come from an autoloaded
-model, pass a callable — `options: -> { Market.pluck(:code) }` — which is
+across code reloading. If a dimension's enum comes from an autoloaded
+model, pass a callable — `enum: -> { Market.pluck(:code) }` — which is
 resolved lazily, on first use.
 
 ## 3. Read where the constant would have been

@@ -6,6 +6,7 @@ require_relative "dials/version"
 require_relative "dials/errors"
 require_relative "dials/generated"
 require_relative "dials/freeze"
+require_relative "dials/schema"
 require_relative "dials/dimension"
 require_relative "dials/definition"
 require_relative "dials/registry"
@@ -57,8 +58,9 @@ module Dials
     # Declare dials:
     #
     #   Dials.define do
-    #     dial :merchant_fee_bps, default: 100, type: :integer, bounds: 1..10_000,
-    #          unit: "bps", variants: { market: { options: %w[KE NG BD] } }
+    #     dial :merchant_fee_bps, default: 100, type: :integer,
+    #          minimum: 1, maximum: 10_000, unit: "bps",
+    #          variants: { market: { enum: %w[KE NG BD] } }
     #     dial :signups_enabled, default: true, type: :boolean
     #   end
     #

@@ -11,13 +11,19 @@ that whole arc as one small library:
 # config/initializers/dials.rb
 Dials.define do
   dial :merchant_fee_bps, default: 100,
-       type: :integer, bounds: 1..10_000, unit: "bps",
-       variants: { market: { options: %w[KE NG BD] } }
+       type: :integer, minimum: 1, maximum: 10_000, unit: "bps",
+       variants: { market: { enum: %w[KE NG BD] } }
 
   dial :signups_enabled, default: true, type: :boolean,
        description: "Global kill switch for new signups."
 end
 ```
+
+The constraint keywords are **JSON Schema**, snake_cased (`minimum:`,
+`maximum:`, `enum:`, `pattern:`, `properties:`/`required:` for `:json`
+values) — if you've written an OpenAPI spec or a JSON Schema, you already
+know this vocabulary, and `definition.to_json_schema` hands the real
+fragment to admin UIs and client-side validators.
 
 Each declaration generates the dial's methods:
 

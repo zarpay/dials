@@ -9,11 +9,11 @@ dimensions are declared per dial:
 
 ```ruby
 dial :checkout_fee_bps, default: 250, type: :integer,
-     variants: { market: { options: %w[KE NG BD] } }
+     variants: { market: { enum: %w[KE NG BD] } }
 
 dial :free_delivery_threshold, default: 5_000, type: :integer,
-     variants: { market: { options: %w[KE NG BD] },
-                 platform: { options: %w[ios android web] } }
+     variants: { market: { enum: %w[KE NG BD] },
+                 platform: { enum: %w[ios android web] } }
 
 dial :welcome_banner, default: { "headline" => "Welcome" }, type: :json,
      variants: { locale: {} }        # open dimension: any non-empty string
@@ -21,7 +21,7 @@ dial :welcome_banner, default: { "headline" => "Welcome" }, type: :json,
 dial :signups_enabled, default: true, type: :boolean   # no variants: global-only
 ```
 
-A dimension with `options:` validates every scope value against the list
+A dimension with `enum:` validates every scope value against the list
 (an `Array` or a callable resolved on first use — e.g.
 `-> { ISO3166::Country.codes }`). An open dimension accepts any non-empty
 string. Dimension values are compared as strings: `market: :KE` and
