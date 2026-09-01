@@ -10,7 +10,7 @@ code review, where it belongs — the database only ever stores values.
 ```ruby
 Dials.define do
   dial :checkout_fee_bps, default: 250, type: _Integer(1..10_000),
-       unit: "bps", variants: { market: %w[KE NG BD] }
+       unit: "bps", dimensions: { market: %w[KE NG BD] }
 end
 
 Dials.checkout_fee_bps                       # => 250
@@ -52,7 +52,7 @@ Dials.define do
        type: _Integer(1..10_000),
        unit: "bps",
        description: "Fee charged at checkout.",
-       variants: { market: %w[KE NG BD], platform: %w[ios android] }
+       dimensions: { market: %w[KE NG BD], platform: %w[ios android] }
 end
 ```
 
@@ -75,9 +75,9 @@ type: _JSONData               # any JSON-native structure
 The default is validated against the type at declaration time, so a dial that
 could never hold its own default fails at boot rather than in production.
 
-`variants:` are the dimensions the dial may vary along, each declared with the
-same kind of matcher. Declaring them is the arming gate: **a dial with no
-variants is global-only by construction**, and adding one belongs in the same
+`dimensions:` are the axes the dial may vary along, each declared with the same
+kind of matcher. Declaring them is the arming gate: **a dial with no
+dimensions is global-only by construction**, and adding one belongs in the same
 change as the code that reads the varied value.
 
 ## Reading
@@ -117,15 +117,42 @@ Writes name the key rather than going through a generated method. The surfaces
 that write — an admin form, a console, a circuit breaker — are holding a key
 already, and a write is worth spelling out.
 
-`actor:` is required on every write and lands in the change log. Pass a model
-(its class, id, and email/name are recorded) or a plain string for a script.
-Resetting returns resolution to the layer below: a reset variant falls back to
-the global, a reset global to the code default. Resetting what was never
+The actor lands in the change log. Pass a model (its class, id, and email/name
+are recorded) or a plain string for a script. It is required unless the app
+declares a `default_actor` (see below).
+Resetting returns resolution to the layer below: a reset scoped override falls
+back to the global, a reset global to the code default. Resetting what was never
 adjusted writes nothing and returns `false`.
 
 Values are validated on the way in, and are checked for surviving a JSON round
 trip — so a symbol key or a `Time` is refused at write time rather than read
 back as something else.
+
+### Concurrent edits
+
+Writes are last-write-wins: two operators saving the same dial both land in the
+log, and the later one is what the dial reads. Nothing is lost — the history has
+both — but nothing is refused either.
+
+When that matters, render a token beside the value and echo it back:
+
+```ruby
+token = Dials[:checkout_fee_bps].version(market: "BD")   # into the form
+
+Dials.adjust(:checkout_fee_bps, 120, market: "BD",
+             actor: current_admin, if_unchanged_since: token)
+# => Dials::StaleWrite if the override moved in between
+```
+
+Tokens are per override, so unrelated dials never false-conflict, and they only
+grow, so a cleared-and-reset override cannot revisit an old one.
+
+**This check is advisory.** The comparison and the insert are not atomic — an
+append-only table has no row to guard, which is the same property that makes
+ordinary writes unable to conflict at all. A writer landing in the microseconds
+between them is not caught. It catches two operators with the same form open,
+which is the conflict that actually happens; it is not a lock, and it is not
+safe to build a counter or a balance on.
 
 ## The catalog
 
@@ -137,14 +164,19 @@ typing it is the deliberate act that gets you an object.
 Dials[:checkout_fee_bps].label       # => "Checkout fee bps"
 Dials[:checkout_fee_bps].default     # => 250
 Dials[:checkout_fee_bps].type        # => _Constraint(Integer, 1..10000)
-Dials[:checkout_fee_bps].variants    # => { market: #<Set: {"KE", "NG", "BD"}> }
+Dials[:checkout_fee_bps].dimensions    # => { market: #<Set: {"KE", "NG", "BD"}> }
 Dials[:checkout_fee_bps].cast(120)   # validate a form input without writing it
 Dials[:checkout_fee_bps].overrides   # => { {} => 300, {market: "BD"} => 120 }
 Dials[:checkout_fee_bps].history     # newest first, with actors
 
 Dials.all                            # every dial, for the index page
+Dials.catalog                        # every dial + its overrides, one snapshot
 Dials.history                        # every change, across every dial
 ```
+
+`Dials.catalog` reads every dial from a single snapshot, so an index page cannot
+render one dial from before a write and the next from after — and it costs one
+query however many dials you have.
 
 ## The one table
 
@@ -179,6 +211,7 @@ every `cache_ttl` seconds when the version check shows another process has.
 Dials.configure do |config|
   config.cache_ttl = 5.0        # 0 checks on every read
   config.actor_label = ->(actor) { actor.email }
+  config.default_actor = -> { ENV.fetch("USER", "console") }
 end
 
 Dials.reload!                   # give up the cache now

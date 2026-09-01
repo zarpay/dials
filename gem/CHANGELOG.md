@@ -72,6 +72,22 @@ raises on every read), and the thread-local in-transaction read isolation (a
 rolled-back write can outlive its example in the cache unless the suite calls
 `Dials.reload!`).
 
+**Adopted from main after it moved on** (`33e7f04..d57f61c`), which independently
+reached the same "a global override is the override at the empty scope" model:
+the `dimensions:` keyword (a "variant" is a candidate value in experimentation
+vocabulary, not an axis), reserved dimension names, key-length validation and
+explicit column limits, `config.default_actor`, and snapshot-coherent
+enumeration as `Dials.catalog`.
+
+**Not adopted: atomic compare-and-swap.** Main guards writes with
+`UPDATE ... WHERE version = ?` against a mutable current-state row. An
+append-only table has no such row, and adding one back — a `supersedes` column
+under a unique index — would reintroduce the unique-violation retry loop that
+append-only exists to delete. Instead `Dial#version` plus `if_unchanged_since:`
+gives an advisory check: non-atomic, documented as such, and sized to the
+conflict that actually happens (two operators, same form, minutes apart) rather
+than to a machine race.
+
 **Kept:** last-known-good serving. A read that cannot reach the database serves
 the cached overrides with a warning rather than raising, and only raises when
 there is no cache yet and so nothing honest to serve.

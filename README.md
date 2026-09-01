@@ -17,7 +17,7 @@ first, are served from a per-process cache, and carry the actor who made them.
 ```ruby
 Dials.define do
   dial :checkout_fee_bps, default: 250, type: _Integer(1..10_000),
-       unit: "bps", variants: { market: %w[KE NG BD] }
+       unit: "bps", dimensions: { market: %w[KE NG BD] }
 end
 
 Dials.checkout_fee_bps(market: "KE")         # => 250

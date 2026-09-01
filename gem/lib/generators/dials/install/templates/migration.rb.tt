@@ -10,10 +10,14 @@ class CreateDials < ActiveRecord::Migration[<%= ActiveRecord::Migration.current_
     # So this table is the change log and the state at the same time, and its
     # row count is the version counter each process watches to notice writes
     # made by another one.
+    # The explicit limits keep the (key, scope, id) index inside every
+    # database's index budget — (100 + 255) * 4 bytes on MySQL utf8mb4 is
+    # comfortably under InnoDB's 3072-byte cap. Key length is validated at
+    # declaration too, so an over-long key fails at boot, not on first write.
     create_table :dials do |t|
-      t.string   :key,   null: false
-      t.string   :scope, null: false, default: "{}" # canonical JSON; "{}" is global
-      t.text     :value                             # JSON-encoded; NULL means cleared
+      t.string   :key,   null: false, limit: 100
+      t.string   :scope, null: false, limit: 255, default: "{}" # canonical JSON; "{}" is global
+      t.text     :value                                         # JSON-encoded; NULL means cleared
       t.string   :actor_type
       t.string   :actor_id
       t.string   :actor_label

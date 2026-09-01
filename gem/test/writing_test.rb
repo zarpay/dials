@@ -35,15 +35,43 @@ class WritingTest < DialsTest
     assert_equal true, Dials.signups_enabled
   end
 
-  def test_every_write_needs_an_actor
+  def test_every_write_needs_an_actor_unless_a_default_is_declared
     declare_fee_and_switch
 
-    assert_raises(ArgumentError) { Dials.adjust(:signups_enabled, false) }
-    error = assert_raises(Dials::Error) { Dials.adjust(:signups_enabled, false, actor: nil) }
+    error = assert_raises(Dials::Error) { Dials.adjust(:signups_enabled, false) }
     assert_match(/needs an actor/, error.message)
+    assert_equal 0, Dials::Record.count
   end
 
-  def test_resetting_a_variant_falls_back_to_the_global
+  def test_a_default_actor_covers_writes_that_name_none
+    declare_fee_and_switch
+    Dials.default_actor = "rake task"
+    Dials.adjust(:signups_enabled, false)
+
+    assert_equal "rake task", Dials[:signups_enabled].history.first.actor_label
+  end
+
+  def test_a_default_actor_can_be_a_callable_evaluated_per_write
+    declare_fee_and_switch
+    who = "first"
+    Dials.default_actor = -> { who }
+
+    Dials.adjust(:signups_enabled, false)
+    who = "second"
+    Dials.adjust(:signups_enabled, true)
+
+    assert_equal %w[second first], Dials[:signups_enabled].history.map(&:actor_label)
+  end
+
+  def test_an_explicit_actor_beats_the_default
+    declare_fee_and_switch
+    Dials.default_actor = "rake task"
+    Dials.adjust(:signups_enabled, false, actor: OPS)
+
+    assert_equal "ops@example.com", Dials[:signups_enabled].history.first.actor_label
+  end
+
+  def test_resetting_a_scoped_override_falls_back_to_the_global
     declare_fee_and_switch
     Dials.adjust(:checkout_fee_bps, 300, actor: OPS)
     Dials.adjust(:checkout_fee_bps, 120, market: "BD", actor: OPS)
@@ -52,7 +80,7 @@ class WritingTest < DialsTest
     assert_equal 300, Dials.checkout_fee_bps(market: "BD")
   end
 
-  def test_resetting_the_global_falls_back_to_the_code_default_and_leaves_variants_alone
+  def test_resetting_the_global_falls_back_to_the_code_default_and_leaves_scoped_overrides_alone
     declare_fee_and_switch
     Dials.adjust(:checkout_fee_bps, 300, actor: OPS)
     Dials.adjust(:checkout_fee_bps, 120, market: "BD", actor: OPS)
@@ -126,6 +154,66 @@ class WritingTest < DialsTest
 
     assert_equal 4, Dials::Record.count
     assert_equal 250, Dials.checkout_fee_bps(market: "KE")
+  end
+
+  def test_a_stale_write_is_refused_when_the_override_moved
+    declare_fee_and_switch
+    token = Dials[:checkout_fee_bps].version(market: "BD")
+    assert_equal 0, token # nothing stored yet
+
+    # Someone else edits between this operator loading the form and saving it.
+    Dials.adjust(:checkout_fee_bps, 300, market: "BD", actor: "another admin")
+
+    error = assert_raises(Dials::StaleWrite) do
+      Dials.adjust(:checkout_fee_bps, 120, market: "BD", actor: OPS, if_unchanged_since: token)
+    end
+    assert_match(/changed since you read it/, error.message)
+
+    assert_equal 300, Dials.checkout_fee_bps(market: "BD")
+    assert_equal 1, Dials::Record.count
+  end
+
+  def test_a_write_carrying_a_current_token_goes_through
+    declare_fee_and_switch
+    Dials.adjust(:checkout_fee_bps, 300, market: "BD", actor: OPS)
+    token = Dials[:checkout_fee_bps].version(market: "BD")
+
+    assert_equal 120, Dials.adjust(:checkout_fee_bps, 120, market: "BD", actor: OPS, if_unchanged_since: token)
+    assert_equal 120, Dials.checkout_fee_bps(market: "BD")
+  end
+
+  def test_the_token_is_per_override_so_unrelated_dials_never_false_conflict
+    declare_fee_and_switch
+    token = Dials[:checkout_fee_bps].version(market: "BD")
+
+    Dials.adjust(:signups_enabled, false, actor: OPS) # a different dial
+    Dials.adjust(:checkout_fee_bps, 900, market: "KE", actor: OPS) # a different scope
+
+    assert_equal 120, Dials.adjust(:checkout_fee_bps, 120, market: "BD", actor: OPS, if_unchanged_since: token)
+  end
+
+  def test_a_reset_can_carry_a_token_too
+    declare_fee_and_switch
+    Dials.adjust(:checkout_fee_bps, 300, market: "BD", actor: OPS)
+    stale = Dials[:checkout_fee_bps].version(market: "BD")
+    Dials.adjust(:checkout_fee_bps, 400, market: "BD", actor: "another admin")
+
+    assert_raises(Dials::StaleWrite) do
+      Dials.reset(:checkout_fee_bps, market: "BD", actor: OPS, if_unchanged_since: stale)
+    end
+    assert_equal 400, Dials.checkout_fee_bps(market: "BD")
+  end
+
+  def test_a_token_survives_a_clear_and_reset_without_repeating_itself
+    declare_fee_and_switch
+    Dials.adjust(:checkout_fee_bps, 300, market: "BD", actor: OPS)
+    first = Dials[:checkout_fee_bps].version(market: "BD")
+    Dials.reset(:checkout_fee_bps, market: "BD", actor: OPS)
+    Dials.adjust(:checkout_fee_bps, 300, market: "BD", actor: OPS)
+
+    # Same value, same scope, but ids only grow — so the old token cannot be
+    # mistaken for the current one.
+    refute_equal first, Dials[:checkout_fee_bps].version(market: "BD")
   end
 
   def test_cast_lets_a_write_surface_validate_before_it_writes

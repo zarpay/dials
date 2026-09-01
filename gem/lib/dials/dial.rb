@@ -13,28 +13,39 @@ module Dials
   # `Dials[:checkout_fee_bps]`, when you want the declaration itself — an admin
   # screen rendering the catalog, or a console poking at the history.
   class Dial
-    attr_reader :key, :default, :type, :variants, :label, :unit, :description
+    # A dimension cannot be named after a keyword the write methods already
+    # take: it would be unreachable, and silently so — the write would target
+    # the global instead of raising.
+    RESERVED_DIMENSIONS = %i[actor if_unchanged_since].freeze
+
+    # Keys land in an indexed column. Held well under it so that the
+    # (key, scope, id) index stays inside every database's index budget —
+    # (100 + 255) * 4 bytes on MySQL utf8mb4 is comfortably under InnoDB's cap.
+    MAX_KEY_LENGTH = 100
+
+    attr_reader :key, :default, :type, :dimensions, :label, :unit, :description
 
     # type::     anything that answers `===` — a class (`Integer`), a range,
     #            a regexp, a Literal type (`_Integer(1..10_000)`, `_Boolean`,
     #            `_JSONData`), a lambda. An Array is sugar for "one of these".
-    # variants:: the dimensions this dial can vary along, each with the same
+    # dimensions:: the dimensions this dial can vary along, each with the same
     #            kind of matcher: `{ market: %w[KE NG BD] }`. Declaring none
     #            makes the dial global-only by construction.
-    def initialize(key, default:, type:, variants: {}, label: nil, unit: nil, description: nil)
+    def initialize(key, default:, type:, dimensions: {}, label: nil, unit: nil, description: nil)
       @key = key.to_sym
       @type = matcher(type)
-      @variants = variants.to_h { |name, values| [name.to_sym, matcher(values)] }.freeze
+      @dimensions = dimensions.to_h { |name, values| [name.to_sym, matcher(values)] }.freeze
       @label = label || @key.to_s.tr("_", " ").capitalize
       @unit = unit
       @description = description
       @default = cast(default)
+      validate_declaration!
       freeze
     rescue Error => e
       raise InvalidDial, "dial #{key}: #{e.message.delete_prefix("#{key}: ")}"
     end
 
-    def variants? = !variants.empty?
+    def dimensions? = !dimensions.empty?
 
     # Resolve the dial for a scope.
     #
@@ -62,19 +73,26 @@ module Dials
     def value = self.for
 
     # Turn the dial. With no scope this moves the global value; with one it
-    # moves the value for exactly those dimensions. `actor:` is required and
-    # lands in the change log.
-    def adjust(value, actor:, **scope)
+    # moves the value for exactly those dimensions. The actor lands in the
+    # change log.
+    #
+    # `if_unchanged_since:` takes a token from #version and refuses the write
+    # if the override moved in between — see #version for what that guarantee
+    # is and is not.
+    def adjust(value, actor: nil, if_unchanged_since: nil, **scope)
+      requested = check_scope!(scope)
       stored = cast(value)
-      Dials.append(key, Scope.dump(check_scope!(scope)), stored, actor)
+      assert_unchanged!(requested, if_unchanged_since)
+      Dials.append(key, Scope.dump(requested), stored, actor)
       stored
     end
 
-    # Drop an override, returning resolution to the layer below: a reset
-    # variant falls back to the global, a reset global to the code default.
+    # Drop an override, returning resolution to the layer below: a reset scoped
+    # override falls back to the global, a reset global to the code default.
     # Returns false — and writes nothing — when there was nothing to reset.
-    def reset(actor:, **scope)
+    def reset(actor: nil, if_unchanged_since: nil, **scope)
       requested = check_scope!(scope)
+      assert_unchanged!(requested, if_unchanged_since)
       return false unless Dials.overrides[key]&.key?(requested)
 
       Dials.append(key, Scope.dump(requested), nil, actor)
@@ -83,6 +101,19 @@ module Dials
 
     # Every stored override for this dial: { scope(Hash) => value }.
     def overrides = Dials.overrides.fetch(key, {})
+
+    # An opaque, monotonic stamp for one override — the id of the row that last
+    # wrote it, or 0 when nothing is stored. Render it into a form alongside
+    # the value, echo it back as `if_unchanged_since:`, and a write that would
+    # clobber someone else's is refused instead.
+    #
+    # Read live rather than from the cache: a token taken from a snapshot up to
+    # `cache_ttl` old would compare the caller against a past they never saw.
+    # Ids only ever grow, so a cleared-and-reset override cannot revisit an old
+    # token.
+    def version(**scope)
+      Record.where(key: key.to_s, scope: Scope.dump(check_scope!(scope))).maximum(:id) || 0
+    end
 
     # This dial's change log, newest first — every adjustment and reset ever
     # made, with the actor who made it.
@@ -112,14 +143,40 @@ module Dials
 
     def inspect
       parts = ["#<Dials::Dial #{key}", "default=#{default.inspect}", "type=#{type.inspect}"]
-      parts << "variants=#{variants.keys.inspect}" if variants?
+      parts << "dimensions=#{dimensions.keys.inspect}" if dimensions?
       "#{parts.join(' ')}>"
     end
 
     private
 
+    # Advisory, and deliberately so. The check and the insert are NOT atomic —
+    # an append-only table has no row to guard, which is the same property that
+    # makes ordinary writes unable to conflict at all. A writer that squeezes
+    # into the microseconds between them is not caught; the conflict this
+    # exists to catch is two operators with the same form open, which takes
+    # minutes to form. A guard rail, not a lock.
+    def assert_unchanged!(scope, expected)
+      return if expected.nil?
+
+      current = Record.where(key: key.to_s, scope: Scope.dump(scope)).maximum(:id) || 0
+      return if current == expected
+
+      raise StaleWrite, "#{key} changed since you read it (you saw #{expected}, it is now #{current})"
+    end
+
+    def validate_declaration!
+      if key.length > MAX_KEY_LENGTH
+        raise InvalidValue, "#{key}: key is longer than #{MAX_KEY_LENGTH} characters"
+      end
+
+      reserved = dimensions.keys & RESERVED_DIMENSIONS
+      return if reserved.empty?
+
+      raise InvalidValue, "#{key}: #{reserved.join(', ')} cannot be a dimension name (the write methods already take it)"
+    end
+
     # Anything that answers `===` is a matcher. An Array is sugar for an enum,
-    # which is far and away the common case for a variant dimension.
+    # which is far and away the common case for a dimension.
     def matcher(spec)
       if spec.is_a?(Symbol)
         raise InvalidValue, "#{key}: #{spec.inspect} is not a type — pass a class (Integer), a Literal type (_Integer(1..10)), or an Array of allowed values"
@@ -131,11 +188,11 @@ module Dials
     def check_scope!(scope)
       requested = Scope.normalize(scope)
       return requested if requested.empty?
-      raise InvalidScope, "#{key} declares no variants, so it takes no scope" unless variants?
+      raise InvalidScope, "#{key} declares no dimensions, so it takes no scope" unless dimensions?
 
       requested.each do |name, value|
-        allowed = variants[name]
-        raise InvalidScope, "#{key} has no #{name} variant (it varies by: #{variants.keys.join(', ')})" if allowed.nil?
+        allowed = dimensions[name]
+        raise InvalidScope, "#{key} has no #{name} dimension (it varies by: #{dimensions.keys.join(', ')})" if allowed.nil?
         raise InvalidScope, "#{value.inspect} is not a valid #{name} for #{key}" unless allowed === value
       end
 
@@ -146,7 +203,7 @@ module Dials
     # later ones. A stored scope matches when every pair it names is in the
     # request, so a partial scope ({market: "KE"}) covers every platform.
     def best_match(stored, requested)
-      order = variants.keys
+      order = dimensions.keys
       stored
         .select { |scope, _| scope.all? { |name, value| requested[name] == value } }
         .min_by { |scope, _| [-scope.size, scope.keys.map { order.index(_1) }.sort] }

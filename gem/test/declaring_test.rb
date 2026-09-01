@@ -53,9 +53,9 @@ class DeclaringTest < DialsTest
     assert_equal "Checkout fee bps", fee.label
     assert_equal "bps", fee.unit
     assert_equal "Fee charged at checkout.", fee.description
-    assert_equal %i[market], fee.variants.keys
-    assert_predicate fee, :variants?
-    refute_predicate Dials[:signups_enabled], :variants?
+    assert_equal %i[market], fee.dimensions.keys
+    assert_predicate fee, :dimensions?
+    refute_predicate Dials[:signups_enabled], :dimensions?
   end
 
   def test_asking_for_a_dial_that_does_not_exist_says_what_does
@@ -76,6 +76,28 @@ class DeclaringTest < DialsTest
   def test_a_key_that_would_shadow_the_api_raises
     error = assert_raises(Dials::InvalidDial) { Dials.define { dial :adjust, default: 1, type: Integer } }
     assert_match(/already exists/, error.message)
+  end
+
+  def test_a_dimension_cannot_be_named_after_a_write_keyword
+    # It would be unreachable, and silently so: the write methods take actor:
+    # and if_unchanged_since: as their own, so the scope would arrive empty and
+    # the write would target the global instead of raising.
+    %i[actor if_unchanged_since].each do |name|
+      error = assert_raises(Dials::InvalidDial) do
+        Dials.define { dial :"fee_#{name}", default: 1, type: Integer, dimensions: { name => %w[a b] } }
+      end
+      assert_match(/cannot be a dimension name/, error.message)
+    end
+  end
+
+  def test_an_overlong_key_raises_at_declaration_rather_than_at_the_column
+    error = assert_raises(Dials::InvalidDial) do
+      Dials.define { dial :"#{'k' * 101}", default: 1, type: Integer }
+    end
+    assert_match(/key is longer than 100 characters/, error.message)
+
+    Dials.define { dial :"#{'k' * 100}", default: 1, type: Integer }
+    assert_equal 1, Dials.all.size
   end
 
   def test_a_default_that_fails_its_own_type_raises_at_declaration
@@ -112,7 +134,7 @@ class DeclaringTest < DialsTest
   def test_a_dial_inspects_readably
     declare_fee_and_switch
 
-    assert_equal "#<Dials::Dial checkout_fee_bps default=250 type=_Constraint(Integer, 1..10000) variants=[:market]>",
+    assert_equal "#<Dials::Dial checkout_fee_bps default=250 type=_Constraint(Integer, 1..10000) dimensions=[:market]>",
                  Dials[:checkout_fee_bps].inspect
   end
 

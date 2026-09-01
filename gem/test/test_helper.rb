@@ -10,8 +10,8 @@ ActiveRecord::Base.establish_connection(adapter: "sqlite3", database: ":memory:"
 ActiveRecord::Schema.verbose = false
 ActiveRecord::Schema.define do
   create_table :dials, force: true do |t|
-    t.string   :key,   null: false
-    t.string   :scope, null: false, default: "{}"
+    t.string   :key,   null: false, limit: 100
+    t.string   :scope, null: false, limit: 255, default: "{}"
     t.text     :value
     t.string   :actor_type
     t.string   :actor_id
@@ -30,6 +30,7 @@ class DialsTest < Minitest::Test
     Dials.undefine_all!
     Dials::Record.delete_all
     Dials.actor_label = nil
+    Dials.default_actor = nil
     # Tests want every write visible at once, with no waiting on a probe.
     Dials.cache_ttl = 0
   end
@@ -39,7 +40,7 @@ class DialsTest < Minitest::Test
     Dials.define do
       dial :checkout_fee_bps, default: 250, type: _Integer(1..10_000),
            unit: "bps", description: "Fee charged at checkout.",
-           variants: { market: %w[KE NG BD] }
+           dimensions: { market: %w[KE NG BD] }
 
       dial :signups_enabled, default: true, type: _Boolean
     end

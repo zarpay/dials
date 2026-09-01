@@ -20,7 +20,7 @@ class ReadingTest < DialsTest
     assert_equal 300, Dials.checkout_fee_bps
   end
 
-  def test_a_variant_beats_the_global_only_in_its_own_scope
+  def test_a_scoped_override_beats_the_global_only_in_its_own_scope
     declare_fee_and_switch
     Dials.adjust(:checkout_fee_bps, 300, actor: OPS)
     Dials.adjust(:checkout_fee_bps, 120, market: "BD", actor: OPS)
@@ -42,7 +42,7 @@ class ReadingTest < DialsTest
   def test_the_most_specific_stored_scope_wins
     Dials.define do
       dial :fee, default: 250, type: Integer,
-           variants: { market: %w[KE BD], platform: %w[ios android] }
+           dimensions: { market: %w[KE BD], platform: %w[ios android] }
     end
 
     Dials.adjust(:fee, 300, actor: OPS)
@@ -57,7 +57,7 @@ class ReadingTest < DialsTest
   def test_a_partial_scope_covers_every_dimension_it_does_not_name
     Dials.define do
       dial :fee, default: 250, type: Integer,
-           variants: { market: %w[KE BD], platform: %w[ios android] }
+           dimensions: { market: %w[KE BD], platform: %w[ios android] }
     end
 
     Dials.adjust(:fee, 150, platform: "ios", actor: OPS)
@@ -70,7 +70,7 @@ class ReadingTest < DialsTest
   def test_equally_specific_scopes_are_broken_by_declaration_order
     Dials.define do
       dial :fee, default: 250, type: Integer,
-           variants: { market: %w[KE BD], platform: %w[ios android] }
+           dimensions: { market: %w[KE BD], platform: %w[ios android] }
     end
 
     Dials.adjust(:fee, 111, market: "BD", actor: OPS)
@@ -84,7 +84,7 @@ class ReadingTest < DialsTest
     declare_fee_and_switch
 
     error = assert_raises(Dials::InvalidScope) { Dials.checkout_fee_bps(platform: "ios") }
-    assert_match(/has no platform variant/, error.message)
+    assert_match(/has no platform dimension/, error.message)
     assert_match(/varies by: market/, error.message)
   end
 
@@ -107,17 +107,17 @@ class ReadingTest < DialsTest
   end
 
   def test_an_overlong_dimension_value_raises
-    Dials.define { dial :fee, default: 1, type: Integer, variants: { market: String } }
+    Dials.define { dial :fee, default: 1, type: Integer, dimensions: { market: String } }
 
     assert_raises(Dials::InvalidScope) { Dials.fee(market: "x" * 129) }
     assert_equal 1, Dials.fee(market: "x" * 128)
   end
 
-  def test_a_dial_without_variants_takes_no_scope
+  def test_a_dial_without_dimensions_takes_no_scope
     declare_fee_and_switch
 
     error = assert_raises(Dials::InvalidScope) { Dials.signups_enabled(market: "KE") }
-    assert_match(/declares no variants/, error.message)
+    assert_match(/declares no dimensions/, error.message)
   end
 
   def test_scope_spelling_does_not_create_a_second_override
@@ -127,6 +127,22 @@ class ReadingTest < DialsTest
 
     assert_equal 130, Dials.checkout_fee_bps(market: "BD")
     assert_equal 1, Dials[:checkout_fee_bps].overrides.size
+  end
+
+  def test_the_catalog_reads_every_dial_from_one_snapshot
+    Dials.cache_ttl = 0 # rebuild on every read, the worst case for tearing
+    declare_fee_and_switch
+    Dials.adjust(:checkout_fee_bps, 300, actor: OPS)
+    Dials.adjust(:signups_enabled, false, actor: OPS)
+
+    pairs = Dials.catalog
+
+    assert_equal %i[checkout_fee_bps signups_enabled], pairs.map { |dial, _| dial.key }
+    assert_equal({ {} => 300 }, pairs.first.last)
+    assert_equal({ {} => false }, pairs.last.last)
+
+    # One snapshot means one query, however many dials are listed.
+    assert_equal 1, count_queries { Dials.catalog }.size
   end
 
   def test_a_dial_can_list_its_own_overrides

@@ -10,9 +10,9 @@ Dials.define do
   #   dial :checkout_fee_bps, default: 250, type: _Integer(1..10_000),
   #        unit: "bps",
   #        description: "Fee charged at checkout.",
-  #        variants: { market: %w[KE NG BD] }
+  #        dimensions: { market: %w[KE NG BD] }
   #
-  # Declaring `variants:` is the arming gate: a dial without them is
+  # Declaring `dimensions:` is the arming gate: a dial without them is
   # global-only by construction, and adding one belongs in the same change as
   # the code that reads the varied value.
 end
@@ -23,4 +23,8 @@ Dials.configure do |config|
 
   # How an actor is labelled in the change log.
   # config.actor_label = ->(actor) { actor.email }
+
+  # Who to attribute a write to when the caller passes no `actor:`. Leave it
+  # unset and every write must name one.
+  # config.default_actor = -> { ENV.fetch("USER", "console") }
 end

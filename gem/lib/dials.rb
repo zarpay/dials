@@ -14,7 +14,7 @@ require_relative "dials/version"
 #
 #   Dials.define do
 #     dial :checkout_fee_bps, default: 250, type: _Integer(1..10_000),
-#          unit: "bps", variants: { market: %w[KE NG BD] }
+#          unit: "bps", dimensions: { market: %w[KE NG BD] }
 #   end
 #
 #   Dials.checkout_fee_bps                   # => 250
@@ -43,6 +43,9 @@ module Dials
   # A scope that names a dimension the dial does not have, or a value that
   # dimension does not allow.
   class InvalidScope < Error; end
+
+  # A write carrying `if_unchanged_since:` whose override moved in between.
+  class StaleWrite < Error; end
 end
 
 require_relative "dials/scope"
@@ -87,6 +90,12 @@ module Dials
     # A callable turning an actor into the label stored on every change.
     attr_accessor :actor_label
 
+    # Who to attribute a write to when the caller passes no `actor:`. A string,
+    # an object, or a callable evaluated per write — for apps with no user
+    # identity behind a console or a rake task. An explicit `actor:` always
+    # wins; with none declared, a write without one still raises.
+    attr_accessor :default_actor
+
     def configure = yield(self)
 
     # -- declaring -----------------------------------------------------------
@@ -95,7 +104,7 @@ module Dials
     # accumulate, so an app can split them up by domain.
     def define(&) = DSL.new.instance_eval(&)
 
-    # The dial itself — its default, type, variants, overrides and history.
+    # The dial itself — its default, type, dimensions, overrides and history.
     # Deliberately explicit: application code reads values through the
     # generated methods and never needs one of these.
     def [](key)
@@ -107,6 +116,14 @@ module Dials
     def registry = @registry ||= {}
     def all = registry.values
     def each(&) = all.each(&)
+
+    # Every declared dial paired with its stored overrides, read from ONE
+    # snapshot — so an admin index cannot render one dial from before a write
+    # and the next from after. => [[Dial, { scope => value }], ...]
+    def catalog
+      snapshot = overrides
+      all.map { |dial| [dial, snapshot.fetch(dial.key, {})] }
+    end
 
     # Not public API; DSL#dial calls it.
     def register(dial)
@@ -178,15 +195,20 @@ module Dials
     # Writes name the key rather than going through a generated method, because
     # the surfaces that write — an admin form, a console, a circuit breaker —
     # are holding a key already, and because a write is worth spelling out.
-    def adjust(key, value, actor:, **scope) = self[key].adjust(value, actor: actor, **scope)
+    def adjust(key, value, actor: nil, if_unchanged_since: nil, **scope)
+      self[key].adjust(value, actor: actor, if_unchanged_since: if_unchanged_since, **scope)
+    end
 
-    # Drop an override, returning resolution to the layer below: a reset variant
-    # falls back to the global, a reset global to the code default. Returns
+    # Drop an override, returning resolution to the layer below: a reset scoped
+    # override falls back to the global, a reset global to the code default. Returns
     # false — and writes nothing — when there was nothing to reset.
-    def reset(key, actor:, **scope) = self[key].reset(actor: actor, **scope)
+    def reset(key, actor: nil, if_unchanged_since: nil, **scope)
+      self[key].reset(actor: actor, if_unchanged_since: if_unchanged_since, **scope)
+    end
 
     # Not public API; Dial#adjust and Dial#reset call it.
     def append(key, scope, value, actor)
+      actor = default_actor.respond_to?(:call) ? default_actor.call : default_actor if actor.nil?
       raise Error, "every write needs an actor: (who is turning this dial?)" if actor.nil?
 
       Record.create!(

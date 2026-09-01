@@ -3,7 +3,7 @@
 require "json"
 
 module Dials
-  # A scope names variant dimensions — `{market: "KE"}`. The empty scope is
+  # A scope names dimensions — `{market: "KE"}`. The empty scope is
   # the global one.
   #
   # Scopes are stored as canonical JSON: sorted string keys, string values.
