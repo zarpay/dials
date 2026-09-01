@@ -12,6 +12,8 @@ require_relative "dials/definition"
 require_relative "dials/registry"
 require_relative "dials/scope"
 require_relative "dials/snapshot"
+require_relative "dials/store_version"
+require_relative "dials/overview"
 require_relative "dials/resolver"
 require_relative "dials/cache"
 require_relative "dials/change_record"
@@ -122,6 +124,36 @@ module Dials
       Resolver.resolve(definition, normalized, current_snapshot)
     end
 
+    # One dial's stored variations as { parsed scope => value }, e.g.
+    # { { market: "BD" } => 24, { market: "NG" } => 48 }. Scopes come back as
+    # parsed hashes, never canonical scope strings. A dial with no stored
+    # variations (or no variants at all) returns {}. Reads from the same
+    # snapshot path as the generated readers, including the in-transaction
+    # rule. The result is deep-frozen — it shares structure with the
+    # process-wide snapshot.
+    def variations(key)
+      definition = registry.fetch(key)
+      parsed_variations(current_snapshot, definition.key)
+    end
+
+    # Every registered dial's full state — definition (with its JSON Schema),
+    # global override (explicitly present-or-absent), and variations — read
+    # from ONE snapshot, so the picture is coherent and stamped with a single
+    # `version` token. Feed that token back as `expected_version:` on writes
+    # for stale-write protection.
+    def overview
+      snapshot = current_snapshot
+      dials = registry.map do |definition|
+        DialState.new(
+          definition: definition,
+          global_override: snapshot.globals.key?(definition.key),
+          global_value: snapshot.globals[definition.key],
+          variations: parsed_variations(snapshot, definition.key)
+        )
+      end.freeze
+      Overview.new(version: StoreVersion.token(snapshot.version), dials: dials)
+    end
+
     # The full change log, newest first. `key:` filters to one dial.
     def changes(key: nil, limit: 50)
       key = registry.fetch(key).key if key
@@ -133,24 +165,31 @@ module Dials
     # Store an override by key — the primitive under the generated
     # adjust_<key> methods. With no scope, overrides the global; with a
     # scope, creates or updates the variation for exactly that scope. The
-    # value is validated against the dial's type and bounds; `actor:` is
+    # value is validated against the dial's type and schema; `actor:` is
     # required and lands in the change log.
-    def set(key, value, actor:, scope: nil)
+    #
+    # `expected_version:` makes the write compare-and-swap: pass the token
+    # from Dials.overview (or a previous CAS write) and the write is refused
+    # with StaleWrite — unapplied, unlogged — if the store has moved since.
+    # A CAS write returns the NEW version token (chain it into the next
+    # write); an unconditional write returns the value, as always.
+    def set(key, value, actor:, scope: nil, expected_version: nil)
       definition = registry.fetch(key)
       actor_attrs = Actor.normalize(actor)
       definition.validate_value!(value)
 
       if scope.nil? || scope.empty?
-        store.set_global(definition.key, value, actor_attrs)
+        store.set_global(definition.key, value, actor_attrs, expected_version: expected_version)
       else
         raise InvalidScope, "dial #{definition.key} declares no variants" unless definition.variants?
 
         normalized = Scope.validate!(definition, scope, exact: true)
-        store.set_variation(definition.key, Scope.canonical(normalized), value, actor_attrs)
+        store.set_variation(definition.key, Scope.canonical(normalized), value, actor_attrs,
+                            expected_version: expected_version)
       end
 
       after_write
-      value
+      expected_version ? StoreVersion.token(store.version) : value
     end
 
     # Remove an override by key — the primitive under the generated
@@ -158,23 +197,37 @@ module Dials
     # cleared variation inherits the global; a cleared global inherits the
     # code default. Returns true if an override existed. Clearing what is not
     # there is a no-op (and logs nothing).
-    def clear(key, actor:, scope: nil)
+    #
+    # `expected_version:` works exactly as on set — the staleness check runs
+    # even when the clear would be a no-op (a page that shows an override
+    # which no longer exists IS stale), and a CAS clear returns the new
+    # version token instead of the boolean.
+    def clear(key, actor:, scope: nil, expected_version: nil)
       definition = registry.fetch(key)
       actor_attrs = Actor.normalize(actor)
 
       removed =
         if scope.nil? || scope.empty?
-          store.clear_global(definition.key, actor_attrs)
+          store.clear_global(definition.key, actor_attrs, expected_version: expected_version)
         else
           normalized = Scope.validate!(definition, scope, exact: true)
-          store.clear_variation(definition.key, Scope.canonical(normalized), actor_attrs)
+          store.clear_variation(definition.key, Scope.canonical(normalized), actor_attrs,
+                                expected_version: expected_version)
         end
 
       after_write
-      removed
+      expected_version ? StoreVersion.token(store.version) : removed
     end
 
     private
+
+    # { canonical scope string => value } from the snapshot, re-keyed by
+    # parsed scope hash. Values are already frozen snapshot references; the
+    # freshly built hashes are frozen so no caller can mutate shared state.
+    def parsed_variations(snapshot, key)
+      stored = snapshot.variations[key] || {}
+      stored.to_h { |canonical, value| [Freeze.deep(Scope.parse(canonical)), value] }.freeze
+    end
 
     def after_write
       cache.bust!

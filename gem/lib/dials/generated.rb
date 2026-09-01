@@ -12,8 +12,9 @@ module Dials
   # `use_base_fee` all work.
   #
   # Scope travels as bare keywords here (`market: "KE"`), which is why
-  # `actor` is a reserved dimension name: on adjust_/clear_ it must always
-  # mean attribution, never scope. Definition enforces the reservation.
+  # `actor` and `expected_version` are reserved dimension names: on
+  # adjust_/clear_ they must always mean attribution and stale-write
+  # protection, never scope. Definition enforces the reservation.
   #
   # The methods live on this module (which Dials extends) rather than on
   # Dials directly so Registry#reset! can strip every generated method
@@ -35,8 +36,12 @@ module Dials
         end
 
         define_method(names[0]) { |**scope| get(key, **scope) }
-        define_method(names[1]) { |value, actor:, **scope| set(key, value, actor: actor, scope: scope) }
-        define_method(names[2]) { |actor:, **scope| clear(key, actor: actor, scope: scope) }
+        define_method(names[1]) do |value, actor:, expected_version: nil, **scope|
+          set(key, value, actor: actor, scope: scope, expected_version: expected_version)
+        end
+        define_method(names[2]) do |actor:, expected_version: nil, **scope|
+          clear(key, actor: actor, scope: scope, expected_version: expected_version)
+        end
       end
 
       def uninstall_all!

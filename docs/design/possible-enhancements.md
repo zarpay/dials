@@ -62,23 +62,14 @@ what's actually common across them. An engine extracted from real surfaces
 beats one designed in advance — and it would live as a separate opt-in
 package (`dials-admin`), never in the core gem.
 
-## Stale-write protection (compare-and-swap)
+## ~~Stale-write protection (compare-and-swap)~~ — shipped
 
-**The idea.** Two operators open the same dial; both edit; the second write
-silently clobbers the first. A CAS-style write —
-`Dials.adjust_<key>(..., expect: <the value or change-id the operator saw>)` —
-would reject the second write with a "value changed under you" error for
-the surface to render.
-
-**What already exists.** The change log gives any surface the data to
-detect and display this after the fact; the loss window is small at
-operator scale (humans, low write rates).
-
-**Why it waits.** It's a write-surface concern more than a storage concern,
-and the right shape (expected old value? expected last change id?) should be
-chosen by the first surface that actually needs it. The originating system's
-dashboard implemented CAS on row identity and it earned its keep — so this
-is likely the first item on this page to graduate.
+This page predicted it would be "the first item to graduate", and it was:
+the first real dashboard needed the guarantee, which chose the shape —
+`expected_version:` on every write path, carrying the opaque version token
+from `Dials.overview`, with a mismatch raising `Dials::StaleWrite`. See the
+[API Reference](/reference/api#writing) and the design notes in
+[Design Decisions](/design/decisions).
 
 ## Non-ActiveRecord stores
 
@@ -86,9 +77,10 @@ is likely the first item on this page to graduate.
 (`Stores::Memory` is the executable spec), so a Redis or HTTP-backed store
 is a straightforward contribution.
 
-**Why it waits.** The staleness probe's version counter and the
-transactional write+log guarantee lean on the database today. A new store
-must provide both, and no concrete deployment has asked for one.
+**Why it waits.** The staleness probe's version counter, the transactional
+write+log guarantee, and the `expected_version:` compare-and-swap contract
+all lean on the database today. A new store must provide all three, and no
+concrete deployment has asked for one.
 
 ---
 

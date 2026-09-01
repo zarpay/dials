@@ -28,6 +28,8 @@ class ActiveRecordStoreTest < Minitest::Test
       end
       add_index :dial_variations, %i[dial_id scope], unique: true
 
+      create_table :dial_locks
+
       create_table :dial_changes do |t|
         t.string :key, null: false
         t.string :scope
@@ -41,6 +43,7 @@ class ActiveRecordStoreTest < Minitest::Test
       end
       add_index :dial_changes, :key
     end
+    Dials::ActiveRecord::Lock.create!(id: Dials::ActiveRecord::Lock::ANCHOR_ID)
     @schema_ready = true
   end
 
@@ -280,5 +283,48 @@ class ActiveRecordStoreTest < Minitest::Test
     settings.create!(key: "support_email", value: JSON.generate("ops@example.com"))
     Dials.reload!
     assert_equal "ops@example.com", Dials.get(:support_email)
+  end
+
+  # -- compare-and-swap (expected_version:) -----------------------------------
+
+  def test_cas_write_succeeds_at_the_current_version_and_returns_the_new_token
+    version = Dials.overview.version
+    token = Dials.adjust_merchant_fee_bps(200, actor: ACTOR, expected_version: version)
+
+    assert_equal 200, Dials.use_merchant_fee_bps(market: "KE")
+    assert_equal Dials.overview.version, token
+  end
+
+  def test_stale_write_rolls_back_the_whole_transaction
+    version = Dials.overview.version
+    Dials.adjust_signups_enabled(false, actor: ACTOR) # the store moves
+
+    changes_before = Dials::ActiveRecord::Change.count
+    # A stale set_variation on a never-overridden dial would create the
+    # parent row before the append — the rollback must take that with it.
+    assert_raises(Dials::StaleWrite) do
+      Dials.adjust_merchant_fee_bps(999, actor: ACTOR, market: "BD", expected_version: version)
+    end
+
+    assert_equal changes_before, Dials::ActiveRecord::Change.count
+    refute settings.exists?(key: "merchant_fee_bps"), "the rollback must remove the parent row too"
+  end
+
+  def test_stale_write_is_not_a_retryable_error
+    # The retry loop re-running a CAS write would recompute against the new
+    # version and succeed, silently defeating the mechanism. Pin the class
+    # relationship the loop depends on.
+    Dials::Stores::ActiveRecordStore::RETRYABLE.each do |retryable|
+      refute_operator Dials::StaleWrite, :<=, retryable
+    end
+  end
+
+  def test_lock_anchor_row_is_created_on_demand_when_missing
+    Dials::ActiveRecord::Lock.delete_all
+    version = Dials.overview.version
+
+    Dials.adjust_merchant_fee_bps(200, actor: ACTOR, expected_version: version)
+    assert_equal 200, Dials.use_merchant_fee_bps(market: "KE")
+    assert Dials::ActiveRecord::Lock.exists?(id: Dials::ActiveRecord::Lock::ANCHOR_ID)
   end
 end

@@ -14,17 +14,51 @@ RSpec.describe "Admin dials API", type: :request do
   end
 
   describe "GET /admin/dials" do
-    it "renders the registry for UI building" do
+    it "renders the registry, stored state, and version for UI building" do
+      Dials.adjust_checkout_fee_bps(120, actor: AdminUser.new(id: 9, email: "ops@bazario.example"), market: "BD")
+
       get "/admin/dials", headers: headers
       expect(response).to have_http_status(:ok)
 
-      dials = response.parsed_body.index_by { |d| d["key"] }
+      body = response.parsed_body
+      expect(body["version"]).to be_a(String)
+
+      dials = body["dials"].index_by { |d| d["key"] }
       expect(dials.keys).to match_array(%w[checkout_fee_bps free_delivery_threshold signups_enabled support_email welcome_banner])
 
       fee = dials["checkout_fee_bps"]
       expect(fee["default"]).to eq(250)
       expect(fee["unit"]).to eq("bps")
       expect(fee["dimensions"]).to eq([{ "name" => "market", "enum" => %w[KE NG BD] }])
+      expect(fee["schema"]).to include("type" => "integer", "minimum" => 1, "maximum" => 10_000)
+      expect(fee["global_override"]).to be(false)
+      expect(fee["variations"]).to eq([{ "scope" => { "market" => "BD" }, "value" => 120 }])
+    end
+  end
+
+  describe "stale-write protection (expected_version)" do
+    it "accepts a write at the rendered version and returns the new token" do
+      get "/admin/dials", headers: headers
+      version = response.parsed_body["version"]
+
+      put "/admin/dials/checkout_fee_bps",
+          params: { value: 300, expected_version: version }.to_json, headers: headers
+      expect(response).to have_http_status(:ok)
+      expect(response.parsed_body["version"]).to be_a(String)
+      expect(Dials.get(:checkout_fee_bps, market: "KE")).to eq(300)
+    end
+
+    it "refuses a write from a stale page with 409, changing nothing" do
+      get "/admin/dials", headers: headers
+      version = response.parsed_body["version"]
+
+      put_dial(:checkout_fee_bps, { value: 300 }) # another operator wins the race
+
+      put "/admin/dials/checkout_fee_bps",
+          params: { value: 999, expected_version: version }.to_json, headers: headers
+      expect(response).to have_http_status(:conflict)
+      expect(Dials.get(:checkout_fee_bps, market: "KE")).to eq(300)
+      expect(Dials.changes.length).to eq(1)
     end
   end
 

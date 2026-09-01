@@ -11,6 +11,7 @@ module Dials
       Setting = Dials::ActiveRecord::Setting
       Variation = Dials::ActiveRecord::Variation
       Change = Dials::ActiveRecord::Change
+      Lock = Dials::ActiveRecord::Lock
 
       # Sentinel for "this row could not be decoded; skip it".
       SKIP = Object.new
@@ -86,8 +87,9 @@ module Dials
         end
       end
 
-      def set_global(key, value, actor)
+      def set_global(key, value, actor, expected_version: nil)
         transaction_with_retry do
+          assert_version!(expected_version)
           setting = Setting.find_or_initialize_by(key: key.to_s)
           old = setting.value.nil? ? nil : decode(setting.value)
           setting.update!(value: encode(value))
@@ -96,8 +98,9 @@ module Dials
         end
       end
 
-      def clear_global(key, actor)
+      def clear_global(key, actor, expected_version: nil)
         transaction_with_retry do
+          assert_version!(expected_version)
           setting = Setting.find_by(key: key.to_s)
           next false if setting.nil? || setting.value.nil?
 
@@ -112,8 +115,9 @@ module Dials
         end
       end
 
-      def set_variation(key, canonical_scope, value, actor)
+      def set_variation(key, canonical_scope, value, actor, expected_version: nil)
         transaction_with_retry do
+          assert_version!(expected_version)
           setting = Setting.find_or_create_by!(key: key.to_s)
           variation = setting.variations.find_or_initialize_by(scope: canonical_scope)
           old = variation.persisted? ? decode(variation.value) : nil
@@ -123,8 +127,9 @@ module Dials
         end
       end
 
-      def clear_variation(key, canonical_scope, actor)
+      def clear_variation(key, canonical_scope, actor, expected_version: nil)
         transaction_with_retry do
+          assert_version!(expected_version)
           setting = Setting.find_by(key: key.to_s)
           variation = setting&.variations&.find_by(scope: canonical_scope)
           next false if variation.nil?
@@ -165,6 +170,35 @@ module Dials
       end
 
       private
+
+      # The compare half of compare-and-swap, atomic with the write: it runs
+      # INSIDE the write's transaction, and every version-checked writer
+      # first takes a row lock on the single dial_locks anchor row — so of
+      # two concurrent writes carrying the same expected version, exactly one
+      # commits; the other blocks on the lock, then re-reads a version that
+      # has moved, and raises. StaleWrite is deliberately not in RETRYABLE:
+      # a retried CAS would recompute against the new version and succeed,
+      # silently defeating the mechanism. On raise the transaction rolls
+      # back — nothing applied, nothing logged.
+      def assert_version!(expected)
+        return if expected.nil?
+
+        lock_anchor!
+        return if expected == StoreVersion.token(version)
+
+        raise StaleWrite,
+              "the store has moved past version #{expected} — re-read (Dials.overview) and retry deliberately"
+      end
+
+      # SELECT ... FOR UPDATE on the anchor row the install migration seeds.
+      # Created on demand for databases migrated before the row existed; the
+      # create race (RecordNotUnique) is RETRYABLE, and the retry finds the
+      # row. SQLite ignores FOR UPDATE but serializes writers at the database
+      # level, which gives the same guarantee.
+      def lock_anchor!
+        Lock.lock.find_by(id: Dials::ActiveRecord::Lock::ANCHOR_ID) ||
+          Lock.create!(id: Dials::ActiveRecord::Lock::ANCHOR_ID)
+      end
 
       def record(key, canonical_scope, action, old_value, new_value, actor)
         Change.create!(

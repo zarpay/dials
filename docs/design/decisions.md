@@ -167,6 +167,26 @@ the flag: declaring `variants:` is the gate, and the recommended
 registry-integrity spec makes arming a visible diff. Global-only dials fall
 out for free: no declaration, no variations, no flag.
 
+## Stale-write protection is a whole-store version CAS
+
+`expected_version:` compares against the **store's** version, not the dial's:
+a page renders at version V, every write echoes V, and any intervening write
+to any dial refuses it. That over-approximates conflicts (editing dial A is
+refused because unrelated dial B changed), and that's accepted deliberately:
+at operator scale the false-conflict rate is near zero, the mental model is
+one sentence ("the page you acted on is stale — re-read"), and the coherent
+`Dials.overview` snapshot already stamps exactly this token. Per-dial or
+per-row versioning is finer-grained and remains possible later without
+changing the token's opacity — callers never parse it.
+
+Two implementation commitments worth recording: the comparison is atomic
+with the write (inside the store transaction, serialized across processes by
+a `SELECT ... FOR UPDATE` on the single `dial_locks` anchor row — portable
+where advisory locks are not), and `StaleWrite` is deliberately excluded
+from the store's transient-error retry loop, because a retried CAS would
+recompute against the new version and succeed, silently defeating the
+mechanism.
+
 ## Validation happens at write time, not read time
 
 Type and schema are enforced when a value is stored (and on every code

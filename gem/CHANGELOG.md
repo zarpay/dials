@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+- **Enumeration API.** `Dials.variations(key)` returns one dial's stored
+  variations keyed by parsed scope hashes ("which markets override this
+  dial?"), and `Dials.overview` returns every registered dial's full state —
+  definition (with its JSON Schema), explicit global-override
+  presence/value, variations — read from one snapshot and stamped with a
+  single opaque version token. Both read through the same path as the
+  generated readers (in-transaction rule included) and return frozen
+  structures.
+- **Stale-write protection (compare-and-swap).** Every write path accepts
+  `expected_version:` — the token from `Dials.overview` (or a previous CAS
+  write's return value). A mismatch raises the new `Dials::StaleWrite` with
+  the write unapplied and nothing logged; the comparison is atomic with the
+  write (serialized across processes via the new single-row `dial_locks`
+  anchor table — the install migration creates and seeds it) and is
+  deliberately never auto-retried. CAS writes return the new version token;
+  unconditional writes keep their usual returns. `expected_version` joins
+  `actor` as a reserved dimension name.
 - **Breaking: constraints now speak JSON Schema; `bounds:` is gone.**
   Declarations take the standard's keywords directly (snake_cased):
   `minimum:`/`maximum:`/`exclusive_minimum:`/`exclusive_maximum:`/

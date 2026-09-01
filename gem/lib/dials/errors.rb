@@ -31,4 +31,13 @@ module Dials
   # Raised when a write arrives without an actor. Every write is attributed;
   # there is no anonymous mutation path through the public API.
   class MissingActor < Error; end
+
+  # Raised when a write carries `expected_version:` and the store has moved
+  # past that version — the caller acted on a stale picture. The write is
+  # not applied and nothing is appended to the change log. Deliberately NOT
+  # retried by the stores (a retried compare-and-swap would recompute
+  # against the new version and succeed, silently defeating the mechanism):
+  # the surface should re-render from Dials.overview and let the operator
+  # decide again.
+  class StaleWrite < Error; end
 end

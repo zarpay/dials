@@ -44,6 +44,16 @@ module Dials
       validates :value, presence: { message: "cannot be SQL NULL" }, unless: -> { value == "false" }
     end
 
+    # A single-row anchor for compare-and-swap writes. A write carrying
+    # expected_version: takes SELECT ... FOR UPDATE on this row inside its
+    # transaction, serializing the version comparison with the change-log
+    # append across processes. One row, no data — it exists to be locked.
+    class Lock < ::ActiveRecord::Base
+      self.table_name = "dial_locks"
+
+      ANCHOR_ID = 1
+    end
+
     # Append-only attribution log; also the store's version counter (its max
     # id moves on every write, which is what the cache staleness probe
     # watches). Never given an updated_at — rows are facts, not state.

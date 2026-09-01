@@ -5,37 +5,51 @@ module Admin
   # by design — see the docs). This JSON controller demonstrates the whole
   # contract:
   #
-  #   GET    /admin/dials            registry + resolved current values
-  #   PUT    /admin/dials/:key       set an override   { value:, scope: }
-  #   DELETE /admin/dials/:key       clear an override { scope: }
+  #   GET    /admin/dials            full state: definitions + overrides + version
+  #   PUT    /admin/dials/:key       set an override   { value:, scope:, expected_version: }
+  #   DELETE /admin/dials/:key       clear an override { scope:, expected_version: }
   #   GET    /admin/dials/:key/changes  attributed history
   #
   # Attribution: the authenticated admin is passed as actor: on every write.
-  # Validation: the gem raises typed errors; they render as 422/400 here.
+  # Validation: the gem raises typed errors; they render as 422/404/409 here.
   #
-  # This controller uses the key-taking primitives (Dials.get/set/clear)
-  # rather than the generated per-dial methods, because the key arrives as a
-  # request param — this is exactly the dynamic-access case the primitives
-  # exist for. Application code with the dial in hand uses the generated
-  # forms (see app/services).
+  # Stale-write protection: the index payload carries the `version` token the
+  # page rendered at; a client that echoes it back as `expected_version` can
+  # never overwrite a change it didn't see — the gem refuses with StaleWrite
+  # (409 here), and the client re-renders from a fresh GET.
+  #
+  # This controller uses the key-taking primitives (Dials.get/set/clear and
+  # Dials.overview) rather than the generated per-dial methods, because the
+  # key arrives as a request param — this is exactly the dynamic-access case
+  # the primitives exist for. Application code with the dial in hand uses the
+  # generated forms (see app/services).
   class DialsController < ApplicationController
     rescue_from Dials::UnknownDial, with: -> { head :not_found }
     rescue_from Dials::InvalidValue, Dials::InvalidScope, Dials::MissingActor do |error|
       render json: { error: error.message }, status: :unprocessable_content
     end
+    rescue_from Dials::StaleWrite do |error|
+      render json: { error: error.message }, status: :conflict
+    end
 
     def index
-      render json: Dials.registry.map { |definition| present(definition) }
+      overview = Dials.overview
+      render json: {
+        version: overview.version,
+        dials: overview.dials.map { |state| present(state) }
+      }
     end
 
     def update
-      Dials.set(dial_key, value_param, scope: scope_param, actor: current_admin)
-      head :no_content
+      result = Dials.set(dial_key, value_param, scope: scope_param, actor: current_admin,
+                                                expected_version: expected_version_param)
+      write_response(result)
     end
 
     def destroy
-      Dials.clear(dial_key, scope: scope_param, actor: current_admin)
-      head :no_content
+      result = Dials.clear(dial_key, scope: scope_param, actor: current_admin,
+                           expected_version: expected_version_param)
+      write_response(result)
     end
 
     def changes
@@ -60,12 +74,30 @@ module Admin
       params[:scope].respond_to?(:to_unsafe_h) ? params[:scope].to_unsafe_h : params[:scope]
     end
 
+    def expected_version_param
+      params[:expected_version].presence
+    end
+
+    # A CAS write returns the new version token — hand it to the client so
+    # sequential edits from one page can chain without a re-fetch.
+    def write_response(result)
+      if expected_version_param
+        render json: { version: result }
+      else
+        head :no_content
+      end
+    end
+
     # A real app plugs in its authentication here (Devise, ActiveAdmin, ...).
     def current_admin
       AdminUser.new(id: 1, email: request.headers.fetch("X-Admin-Email", "admin@bazario.example"))
     end
 
-    def present(definition)
+    # One dial's declaration AND stored state, from the coherent overview
+    # snapshot. `global_override` stays an explicit boolean — a kill switch
+    # overridden to false must never render as "no override".
+    def present(state)
+      definition = state.definition
       {
         key: definition.key,
         label: definition.label,
@@ -73,7 +105,11 @@ module Admin
         unit: definition.unit,
         description: definition.description,
         default: definition.default,
-        dimensions: definition.dimensions.map { |d| { name: d.name, enum: d.enum } }
+        schema: state.json_schema,
+        dimensions: definition.dimensions.map { |d| { name: d.name, enum: d.enum } },
+        global_override: state.global_override?,
+        global_value: state.global_value,
+        variations: state.variations.map { |scope, value| { scope: scope, value: value } }
       }
     end
   end

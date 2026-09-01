@@ -99,6 +99,43 @@ The key-taking primitive under `use_<key>`, for code that receives the key
 at runtime (an admin surface, a console). Same semantics; also raises
 `Dials::UnknownDial` for an undeclared key.
 
+### `Dials.variations(key) → { scope => value }`
+
+One dial's stored variations, keyed by **parsed** scope hashes (never
+canonical scope strings) — "which markets have an override for this dial":
+
+```ruby
+Dials.variations(:checkout_fee_bps)   # => { { market: "BD" } => 120,
+                                      #      { market: "NG" } => 180 }
+```
+
+`{}` when nothing is stored (or the dial declares no variants); raises
+`Dials::UnknownDial` for undeclared keys. Reads through the same snapshot
+path as every other read (in-transaction rule included); the result is
+deep-frozen.
+
+### `Dials.overview → Overview`
+
+Every registered dial's full state — the `Definition` (with `json_schema`),
+whether a global override exists and its value, and its variations — read
+from ONE snapshot in one call, so an admin page renders a coherent picture
+stamped with a single version:
+
+```ruby
+overview = Dials.overview
+overview.version                    # opaque token; echo back as expected_version:
+overview.dials.each do |state|
+  state.key                         # :checkout_fee_bps
+  state.definition                  # the Definition
+  state.json_schema                 # JSON Schema fragment for this dial
+  state.global_override?            # explicitly present-or-absent...
+  state.global_value                # ...because false ≠ "no override"
+  state.variations                  # { parsed scope => value }
+end
+```
+
+All returned structures are frozen.
+
 ### `Dials.registry`
 
 Enumerable of `Dials::Definition`. Useful members for building UIs:
@@ -146,6 +183,38 @@ Validates type, schema, and scope; requires `actor:` (which is why `actor`
 is a reserved dimension name). Appends to the change log and busts the local
 cache. Raises `Dials::InvalidValue`, `Dials::InvalidScope`,
 `Dials::MissingActor`.
+
+### `expected_version:` — stale-write protection
+
+Every write path (generated and primitive) accepts `expected_version:`,
+which makes the write **compare-and-swap**: pass the token your page
+rendered at (from `Dials.overview`) and the write is refused with
+`Dials::StaleWrite` — unapplied, with nothing appended to the change log —
+if the store has moved since. Of two concurrent writes carrying the same
+token, exactly one commits; the comparison is atomic with the write inside
+the store's transaction, never a pre-check.
+
+```ruby
+overview = Dials.overview
+# ... operator looks at the page, decides ...
+token = Dials.adjust_checkout_fee_bps(300, actor: admin,
+                                      expected_version: overview.version)
+# a CAS write returns the NEW token — chain it into the next write:
+Dials.clear_checkout_fee_bps(actor: admin, expected_version: token)
+```
+
+The token is opaque: obtain it from `overview` or a CAS write's return
+value and echo it back — never construct or parse one. Any successful write
+(CAS or not) moves the version. `expected_version` is a reserved dimension
+name, like `actor`. Passing nothing keeps today's unconditional
+last-write-wins, and unconditional writes keep their usual return values
+(the value for set, the boolean for clear). The staleness check runs even
+when a clear would be a no-op — a page showing an override that no longer
+exists is stale.
+
+On `StaleWrite`, re-render from a fresh `Dials.overview` and let the
+operator decide again; retrying automatically would defeat the mechanism
+(the stores deliberately never auto-retry it).
 
 ### `Dials.clear_<key>(actor:, **scope) → true/false`
 
@@ -217,3 +286,4 @@ All inherit `Dials::Error`:
 | `InvalidValue` | wrong type, schema violation, or nil on write/pin |
 | `InvalidScope` | wrong/missing/unknown dimensions or values |
 | `MissingActor` | write without `actor:` |
+| `StaleWrite` | `expected_version:` no longer matches the store — unapplied, unlogged |

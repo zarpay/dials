@@ -9,14 +9,20 @@ module Dials
     #
     #   state                                  → { globals:, variations:, version: }
     #   version                                → monotonic value, moves on every write
-    #   set_global(key, value, actor)          → previous value or nil
-    #   clear_global(key, actor)               → true if an override existed
-    #   set_variation(key, canonical, value, actor) → previous value or nil
-    #   clear_variation(key, canonical, actor) → true if a variation existed
+    #   set_global(key, value, actor, expected_version: nil)          → previous value or nil
+    #   clear_global(key, actor, expected_version: nil)               → true if an override existed
+    #   set_variation(key, canonical, value, actor, expected_version: nil) → previous value or nil
+    #   clear_variation(key, canonical, actor, expected_version: nil) → true if a variation existed
     #   changes(key: nil, limit: 50)           → newest-first [ChangeRecord]
     #
     # `actor` is the normalized hash from Dials::Actor. Value validation and
     # scope validation happen above the store; a store only persists.
+    #
+    # `expected_version:` (an opaque StoreVersion token) makes the write
+    # compare-and-swap: the comparison is atomic with the write — here,
+    # inside the same mutex hold — and a mismatch raises StaleWrite with
+    # nothing applied or logged. The check runs before the existence check
+    # on clears: a no-op clear against a stale picture is still stale.
     #
     # Values are round-tripped through JSON on write, exactly like the
     # ActiveRecord store. That buys two guarantees at once: the store never
@@ -48,8 +54,9 @@ module Dials
         @mutex.synchronize { @version }
       end
 
-      def set_global(key, value, actor)
+      def set_global(key, value, actor, expected_version: nil)
         @mutex.synchronize do
+          assert_version!(expected_version)
           stored = roundtrip(value)
           old = @globals[key]
           @globals[key] = stored
@@ -58,8 +65,9 @@ module Dials
         end
       end
 
-      def clear_global(key, actor)
+      def clear_global(key, actor, expected_version: nil)
         @mutex.synchronize do
+          assert_version!(expected_version)
           next false unless @globals.key?(key)
 
           old = @globals.delete(key)
@@ -68,8 +76,9 @@ module Dials
         end
       end
 
-      def set_variation(key, canonical_scope, value, actor)
+      def set_variation(key, canonical_scope, value, actor, expected_version: nil)
         @mutex.synchronize do
+          assert_version!(expected_version)
           stored = roundtrip(value)
           old = @variations[key][canonical_scope]
           @variations[key][canonical_scope] = stored
@@ -78,8 +87,9 @@ module Dials
         end
       end
 
-      def clear_variation(key, canonical_scope, actor)
+      def clear_variation(key, canonical_scope, actor, expected_version: nil)
         @mutex.synchronize do
+          assert_version!(expected_version)
           next false unless @variations.key?(key) && @variations[key].key?(canonical_scope)
 
           old = @variations[key].delete(canonical_scope)
@@ -97,6 +107,16 @@ module Dials
       end
 
       private
+
+      # Callers hold the mutex. Raises StaleWrite before anything is touched,
+      # so the transactionless memory store still guarantees "unapplied and
+      # unlogged" on a version mismatch.
+      def assert_version!(expected)
+        return if expected.nil? || expected == StoreVersion.token(@version)
+
+        raise StaleWrite,
+              "the store has moved past version #{expected} — re-read (Dials.overview) and retry deliberately"
+      end
 
       # Callers hold the mutex. Old/new values are duplicated (so a change
       # record never shares structure with the live store state) and frozen

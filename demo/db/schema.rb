@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_08_31_142141) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_01_120000) do
   create_table "dial_changes", force: :cascade do |t|
     t.string "action", null: false
     t.string "actor_id"
@@ -22,6 +22,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_08_31_142141) do
     t.text "old_value"
     t.string "scope"
     t.index ["key"], name: "index_dial_changes_on_key"
+  end
+
+  create_table "dial_locks", force: :cascade do |t|
   end
 
   create_table "dial_variations", force: :cascade do |t|

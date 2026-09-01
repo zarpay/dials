@@ -27,6 +27,14 @@ class CreateDialsTables < ActiveRecord::Migration[<%= ActiveRecord::Migration.cu
 
     # Append-only attribution log. Doubles as the cache's version counter
     # (max id moves on every write). No updated_at: rows are facts.
+    # A single-row anchor for compare-and-swap writes (expected_version:):
+    # writers SELECT ... FOR UPDATE this row to serialize the version check
+    # with the change-log append. One row, no data.
+    create_table :dial_locks
+    reversible do |dir|
+      dir.up { execute "INSERT INTO dial_locks (id) VALUES (1)" }
+    end
+
     create_table :dial_changes do |t|
       t.string :key, null: false
       t.string :scope

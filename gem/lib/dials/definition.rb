@@ -144,9 +144,14 @@ module Dials
       raise InvalidDefinition, "#{key}: duplicate variant dimension" unless names.uniq.length == names.length
 
       # Generated adjust_/clear_ methods take scope as bare keywords next to
-      # actor:, so a dimension named actor could never be passed to them.
+      # actor: and expected_version:, so dimensions by those names could
+      # never be passed to them.
       if names.include?(:actor)
         raise InvalidDefinition, "#{key}: actor is a reserved dimension name (it means attribution on every write)"
+      end
+      if names.include?(:expected_version)
+        raise InvalidDefinition,
+              "#{key}: expected_version is a reserved dimension name (it means stale-write protection on every write)"
       end
 
       if @validate && !@validate.respond_to?(:call)
