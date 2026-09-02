@@ -78,6 +78,13 @@ Three GitHub workflows live in `.github/workflows/`:
 - Documentation → PR against `docs/` (`npm run build` must pass).
 - New integration scenarios or app-level patterns → PR against `demo/`.
 
+## Acknowledgments
+
+The append-only storage design ("the log is the state") and the bare-name
+readers were adopted from an exploration by Stephen Margheim
+([@fractaledmind](https://github.com/fractaledmind)) in
+[PR #1](https://github.com/zarpay/dials/pull/1).
+
 ## License
 
 [MIT](./LICENSE.txt).
