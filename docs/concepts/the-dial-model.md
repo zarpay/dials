@@ -10,12 +10,11 @@ Every read resolves through the same three layers, top down:
 3. code default     — the value declared in Dials.define (your initializer)
 ```
 
-The first layer that has a value wins. That is the entire model; everything
-else in the gem exists to keep this rule honest.
+The first layer that has a value wins. That is the entire model.
 
 ## The database stores only overrides
 
-This is the load-bearing decision. When you declare
+When you declare
 
 ```ruby
 dial :checkout_fee_bps, default: 250, type: :integer, minimum: 1, maximum: 10_000
@@ -36,12 +35,12 @@ the value?
   semantics, a changed default flows out on deploy *unless* someone
   deliberately overrode it — and an admin surface can show exactly which
   dials are overridden and offer "reset to default".
-- **Boot-time writes are a tax.** Seeding at boot needs `table_exists?`
+- **Boot-time writes are extra machinery.** Seeding at boot needs `table_exists?`
   guards for fresh clones and `rake db:migrate`, race handling across
   multi-process boot, and read-replica awareness. Override semantics write
   nothing until a human acts.
-- **"No rows" means "nothing overridden".** The table is a worklist of
-  deliberate operator decisions, not a mirror of the registry.
+- **"No rows" means "nothing overridden".** Every row is a deliberate
+  operator action; the table is not a mirror of the registry.
 
 ## One append-only table
 
@@ -65,8 +64,9 @@ counter (the row count).
 A global override **is** an override at the empty scope — the resolution
 model already says so ("most specific scope wins; the global constrains
 nothing"), and storage says the same thing. `"{}"` is not a sentinel: it is
-`Scope.canonical({})`, the truthful canonical encoding of a real value in
-the scope algebra — unlike an `'XX'` pretending to be a market.
+`Scope.canonical({})`, the canonical encoding of the empty scope — a real
+value, unlike a made-up `'XX'` market that every reader would have to know
+to skip.
 
 Concurrency needs no lock table and no guarded updates: `seq` numbers each
 stream's rows, and `UNIQUE(key, scope, seq)` means every writer claims the

@@ -1,6 +1,6 @@
 # Retrofit an Admin Table
 
-The second adoption path: your app already built the middle of the arc — a
+The second adoption path: your app already has a home-grown version — a
 `settings` / `system_configs`-style table with an admin form — and it's
 straining (no types, no constraints, no dimensions, sentinel rows, unclear
 history). This guide migrates values *out* of that table into dials.

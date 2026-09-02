@@ -32,14 +32,15 @@ override is the stream at the **empty scope**, stored as its canonical
 encoding `"{}"`.
 
 The alternative — a parent `dials` row per key with scoped rows hanging off
-an FK — buys protection this gem cannot use and pays for it in bookkeeping:
+an FK — adds protection this gem cannot use, at the cost of ongoing
+bookkeeping:
 
 - **There is exactly one reader and one writer — the store.** Every other
   access goes through the in-process snapshot. A two-table shape exists to
   protect many direct readers; here, those readers cannot exist.
-- **`"{}"` is not a sentinel.** It is `Scope.canonical({})` — the truthful
-  canonical encoding of a real value in the scope algebra, unlike a magic
-  `'XX'` row pretending to be a market.
+- **`"{}"` is not a sentinel.** It is `Scope.canonical({})` — the canonical
+  encoding of the empty scope, a real value, unlike a magic `'XX'` row that
+  every reader would have to know to skip.
 - **An FK enforces less than it advertises.** It can guarantee a scoped row
   has a parent *row*, not a parent *override* (scoped overrides legitimately
   outlive a cleared global) — a mechanical anchor whose lifecycle
@@ -65,7 +66,7 @@ row per `(key, scope)` stream is the current override — action `set`
 carries a value, action `clear` ends the override. `seq` numbers each
 stream's rows under `UNIQUE(key, scope, seq)`, so every writer claims the
 stream's next slot and of two concurrent claims the database rejects one.
-What the shape buys:
+What this gives:
 
 - **History cannot disagree with state** — they are the same rows. An
   override's previous value is literally its previous row, so
@@ -116,15 +117,15 @@ jsonb.
 
 The primary API is generated at declaration time: `Dials.base_fee(...)` to
 read, `Dials.adjust_base_fee(...)` and `Dials.clear_base_fee(...)` to write.
-The asymmetry is the point: reading is what you do with a dial all day and
-pays no prefix tax, while the writers carry verbs — so a bare name is always
-a read and a mutation always announces itself. Nothing bare can write.
+Reads are far more common than writes, so the reader gets the short name;
+the writers carry verbs, so a bare name is always a read and a write is
+always visibly a write. Nothing bare can write.
 
 The bare reader costs one thing: a dial cannot share a name with a facade
 method (`:store`, `:cache`, `:changes`, ...) — the boot-time collision check
 turns that into an `InvalidDefinition` error rather than silent shadowing.
 
-Three properties keep the dynamic layer honest:
+Three related properties:
 
 - The methods are **defined at declaration time**, never `method_missing` —
   `respond_to?`, tab completion, and a grep for `base_fee` all work, and
@@ -157,7 +158,7 @@ rather than a bespoke constraint slot. Three reasons, in order of weight:
 Two deliberate divergences from the standard, both toward boot-time
 strictness: keywords are validated against the dial's type at declaration
 (JSON Schema silently ignores keywords on mismatched types — exactly the
-silent-nothing this gem's boot checks exist to prevent), and declaring
+kind of silent failure the boot checks exist to prevent), and declaring
 `properties:`/`required:` pins a `:json` dial's values to objects. A
 `validate:` callable remains as the explicitly non-serializable escape
 hatch. Constraint objects from a validation library (e.g. Literal's
@@ -212,7 +213,7 @@ Configure-before-consume is a real hazard: a stored value nothing reads yet,
 waiting to surprise whoever ships the reader. The gem guards it without a
 separate flag: declaring `dimensions:` is the gate, and the recommended
 registry-integrity spec makes arming a visible diff that goes through code
-review. Global-only dials fall out for free: no declaration, no scoped
+review. Global-only dials need no gate: no declaration, no scoped
 overrides, nothing to arm.
 
 ## Stale-write protection is per-override optimistic locking
@@ -231,9 +232,9 @@ against a whole-store aggregate instead would false-conflict unrelated
 overrides and force a lock (no conditional statement can guard an
 aggregate); an advisory (non-atomic) check was rejected because a race that
 "basically never happens" is still a race. The table's count+max(id) is the
-**cache probe's** clock; it was only ever the wrong thing to CAS against.
+**cache probe's** clock, not a CAS target.
 
-The edges are load-bearing:
+Details that matter:
 
 - `StaleWrite` is deliberately excluded from the store's retry loop — a
   retried CAS would recompute against the new version and succeed, silently
@@ -258,7 +259,7 @@ if a deploy narrows a dial's schema from `maximum: 1000` to `maximum: 100`, a st
 Read-time enforcement has no good failure mode — rejecting the stored value
 mid-request means either raising (an incident caused by a deploy that
 changed no values) or silently substituting the default (exactly the kind
-of guess this gem refuses to make). The honest contract: narrowing a
+of guess this gem refuses to make). The contract: narrowing a
 declaration is a migration, and the deploy that narrows a schema should check
 `Dials.changes` / the stored overrides for now-invalid values and fix
 them explicitly. What read-time *does* defend is robustness, not policy:
@@ -269,6 +270,6 @@ taking down every dial read.
 
 Unknown dial, missing dimension, unknown dimension, out-of-enum value,
 schema-violating write, nil value, missing actor — all raise typed errors
-immediately. The only silent path is the happy one (no override → next layer
-down). A configuration system that guesses at what you meant is a
-configuration system you cannot trust during an incident.
+immediately. The only silent path is the normal one (no override → next
+layer down). A configuration system that guesses at what you meant cannot be
+trusted during an incident.

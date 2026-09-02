@@ -6,8 +6,8 @@ production incidents rather than error messages. The test:
 > A value is a dial when the global default **should flow through** to every
 > scope that hasn't explicitly overridden it.
 
-That flow-through is the feature. It is also the danger, so check each
-candidate against the cases below.
+That flow-through is what makes a dial useful — and what makes it dangerous
+on the wrong value — so check each candidate against the cases below.
 
 ## Dial-shaped values
 
@@ -16,7 +16,7 @@ candidate against the cases below.
 - A kill switch.
 - A batch size, a timeout, a retry count that ops adjusts under load.
 
-The tell: when someone updates the global, you **want** every non-overridden
+The common trait: when someone updates the global, you **want** every non-overridden
 scope to move with it, immediately.
 
 ## Deliberately-priced bundles are NOT dials
@@ -54,7 +54,7 @@ move?"* If anyone says "no, obviously not" — domain table.
   markets, platforms, locales — a table an operator can read, not a
   million-row store.
 
-## The honest heuristic
+## Rule of thumb
 
 If the value's natural home is a spreadsheet an operator owns, it's probably
 a dial. If its natural home is a migration, a contract, or a vault — it

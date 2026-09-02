@@ -23,7 +23,7 @@ FREE_DELIVERY_THRESHOLD = 5_000
 SIGNUPS_ENABLED = true
 ```
 
-Then the arc begins. Someone needs to change a fee **today**, so the constant
+Then someone needs to change a fee **today**, so the constant
 becomes a database row with an admin form. Then a second market launches and
 needs a *different* fee, so the row grows a country column and a sentinel
 value for "global". Six months later the app has some values in specialized
@@ -32,7 +32,7 @@ resolver next to each one — every developer solving fallback, validation,
 and caching again, slightly differently, with no shared answer to "who
 changed this and what values are safe?"
 
-Dials is that whole arc, designed once:
+Dials is all of that, built once:
 
 - **Declarations stay in code.** A dial's default, type, constraints, and
   dimensions are Ruby, reviewed in PRs — the database stores only
@@ -46,7 +46,7 @@ Dials is that whole arc, designed once:
 - **Every write is attributed.** `Dials.adjust_checkout_fee_bps(..., actor:
   current_admin)` is the only write path, and it appends to a change log you
   can render as history.
-- **Reads are free.** A per-process snapshot cache serves every read from
+- **Reads are memory-only.** A per-process snapshot cache serves every read from
   memory; a throttled probe (one cheap query per interval) converges other
   processes after a write.
 

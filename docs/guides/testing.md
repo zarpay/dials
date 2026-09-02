@@ -1,7 +1,7 @@
 # Testing with Dials
 
-Two audiences: testing code that *consumes* dials, and keeping the suite
-honest about the dial layer itself.
+Two audiences: testing code that *consumes* dials, and testing the dial
+layer itself.
 
 ## Pin values with `with_overrides`
 

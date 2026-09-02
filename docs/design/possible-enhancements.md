@@ -2,13 +2,12 @@
 
 Things the gem deliberately does **not** do yet. Each was considered, and in
 most cases the design already accommodates it — what's missing is a real
-need. This page exists so those ideas don't have to be re-derived (or
-re-litigated) later: if you hit one of these needs, the groundwork and the
+need. This page exists so those ideas don't have to be re-derived
+later: if you hit one of these needs, the groundwork and the
 open questions are recorded here.
 
-None of this is a commitment. The gem's bias is to stay small until a
-concrete use case forces a decision, because speculative surface area is how
-configuration systems get weird.
+None of this is a commitment. The gem stays small until a concrete use case
+forces a decision.
 
 ## Partial scopes
 
@@ -71,11 +70,11 @@ package (`dials-admin`), never in the core gem.
 rows ARE the current overrides, the history, and the cache's version
 counter, so "dials without history" is not a mode the storage could offer —
 deleting history would delete the state.
-The motivations dissolve on inspection anyway: attribution never needed a
+The usual motivations don't hold up anyway: attribution never needed a
 User model (string actors; `config.default_actor` makes `actor:` optional),
 a PII concern is answered by `config.default_actor = "anonymous"`, and at
-operator write-rates the table stays small forever. An app that truly wants
-no record of operator changes is asking this gem to stop being itself.
+operator write-rates the table stays small forever. An app that wants no
+record of operator changes should not use this gem.
 
 ## Point-in-time reads (`as_of:`)
 
@@ -104,6 +103,6 @@ concrete deployment has asked for one.
 
 ---
 
-Have a need that belongs here, or one of these needs graduating? Open an
+Have a need that belongs here, or a concrete case for one of these? Open an
 issue — the bar isn't "would this be nice" but "here is the concrete
 situation the current design handles badly."

@@ -34,7 +34,7 @@ which must always mean attribution.
 ## Declaring dimensions IS the arming gate
 
 A dial with no `dimensions:` cannot hold a scoped override — the write is
-rejected, not ignored. This is a process invariant disguised as an API:
+rejected, not ignored. The API enforces a process rule:
 
 > Add the `dimensions:` declaration in the same PR as the code that reads the
 > varied value.
@@ -48,7 +48,7 @@ dials in a registry-integrity spec
 ([`spec/dials/registry_spec.rb`](https://github.com/zarpay/dials/blob/main/demo/spec/dials/registry_spec.rb))
 so arming one more dial fails a test until the pin is deliberately updated.
 
-The same logic gives you global-only dials for free: a kill switch declared
+The same rule protects global-only dials: a kill switch declared
 without `dimensions:` *cannot* be half-off in one market, even by a determined
 operator with production console access to the API.
 

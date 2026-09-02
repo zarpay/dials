@@ -16,7 +16,7 @@ The generator creates:
   one row per write, where the newest row per (key, scope) is the current
   override. State, attributed history, and the cache's version counter are
   the same rows. Values are JSON **text** (portable across PostgreSQL,
-  MySQL, and SQLite; nothing ever queries inside a value, so jsonb buys
+  MySQL, and SQLite; nothing ever queries inside a value, so jsonb adds
   nothing — see [Caching](/concepts/caching)).
 - **`config/initializers/dials.rb`** with a commented starter registry.
 
@@ -63,7 +63,7 @@ class Pricing::QuoteService
 end
 ```
 
-Consumers never know which layer a value came from. That is the point.
+Consumers never know which layer a value came from, and never need to.
 
 ## Recommended from day one
 

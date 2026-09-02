@@ -60,7 +60,7 @@ Once a process holds a snapshot, a probe or rebuild failure serves
 **last-known-good** with a warning — a database blip must not take down
 every dial read (the values it's serving were true moments ago, and the
 next healthy probe converges). Only a cold start with no snapshot at all
-raises: there, nothing honest exists to serve.
+raises: there is nothing to serve.
 
 Two other concurrency properties the cache guarantees: the store is never
 queried while a lock is held (a mutex held across a connection checkout can

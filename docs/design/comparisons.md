@@ -13,7 +13,7 @@ YAML — with typed fields declared in code and a read-only web UI.
 - **Its problem**: *deploy/environment configuration* — values that differ by
   environment and change with deploys, unified behind one API.
 - **What it lacks for the dials problem**: dimensions (its only axis
-  is the Rails environment), write attribution, validation with teeth, and a
+  is the Rails environment), write attribution, enforced validation, and a
   first-class override/clear model.
 - **What dials lacks for its problem**: ENV and YAML layers, deliberately —
   a dial changing per-environment via ENV would undermine "the change log is
@@ -58,9 +58,9 @@ detail.
 
 ## A hand-rolled settings table
 
-The default alternative, because it's an afternoon's work. The afternoon
-buys the middle of the arc; the years buy the rest piecemeal and under
-incident pressure: type casting, value constraints, `false` vs `NULL`, per-market rows
-and their sentinel, fallback reads, cache invalidation across processes,
-attribution, and "who changed this at 3am". Dials is that list, done once,
-with the sharp edges named and tested.
+The default alternative, because it's an afternoon's work. But the afternoon
+covers only reading and writing a value; the rest gets built later,
+piecemeal, usually during an incident: type casting, value constraints,
+`false` vs `NULL`, per-market rows and their sentinel, fallback reads, cache
+invalidation across processes, attribution, and "who changed this at 3am".
+Dials is that list, built once and tested.
