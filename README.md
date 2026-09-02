@@ -1,5 +1,6 @@
 # dials
 
+[![Gem Version](https://img.shields.io/gem/v/dials)](https://rubygems.org/gems/dials)
 [![CI](https://github.com/zarpay/dials/actions/workflows/ci.yml/badge.svg)](https://github.com/zarpay/dials/actions/workflows/ci.yml)
 [![License](https://img.shields.io/github/license/zarpay/dials)](https://github.com/zarpay/dials/blob/main/LICENSE.txt)
 [![Ruby](https://img.shields.io/badge/Ruby-%3E%3D%203.2-blue)](https://rubygems.org)
