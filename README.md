@@ -80,6 +80,11 @@ Three GitHub workflows live in `.github/workflows/`:
 
 ## Acknowledgments
 
+Sebastian Scholl ([@sebscholl](https://github.com/sebscholl)) pushed for
+extracting this functionality as a gem in the first place, advocated the
+JSON Schema constraint vocabulary, and gave solid feedback on the early
+design.
+
 The append-only storage design ("the log is the state") and the bare-name
 readers were adopted from an exploration by Stephen Margheim
 ([@fractaledmind](https://github.com/fractaledmind)) in
