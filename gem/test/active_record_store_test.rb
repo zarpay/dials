@@ -275,6 +275,41 @@ class ActiveRecordStoreTest < Minitest::Test
     assert_match(/unknown action/, err)
   end
 
+  def test_malformed_tombstone_scopes_are_quarantined_and_never_break_overview
+    Dials.adjust_merchant_fee_bps(90, actor: ACTOR, market: "KE")
+    entries.insert_all!([
+                          { key: "merchant_fee_bps", scope: "not-json", seq: 1,
+                            action: "clear", created_at: Time.now.utc },
+                          { key: "merchant_fee_bps", scope: '{ "market" : "NG" }', seq: 1,
+                            action: "clear", created_at: Time.now.utc }
+                        ])
+    Dials.reload!
+
+    overview = nil
+    _out, err = capture_io { overview = Dials.overview }
+    state = overview.dials.find { |d| d.key == :merchant_fee_bps }
+    assert_equal [{ market: "KE" }], state.scoped_override_versions.keys,
+                 "corrupt tombstones are quarantined, not parsed into the token map"
+    assert_match(/skipping corrupt row/, err)
+  end
+
+  def test_history_applies_the_same_quarantine_rules_as_state
+    Dials.adjust_merchant_fee_bps(150, actor: ACTOR)
+    entries.insert_all!([
+                          { key: "merchant_fee_bps", scope: Dials::Scope::GLOBAL, seq: 5,
+                            action: "sett", value: "1", created_at: Time.now.utc },
+                          { key: "merchant_fee_bps", scope: '{ "market" : "NG" }', seq: 1,
+                            action: "set", value: "5", created_at: Time.now.utc }
+                        ])
+
+    changes = nil
+    _out, err = capture_io { changes = Dials.changes(key: :merchant_fee_bps) }
+    assert_equal 1, changes.length, "unknown actions and noncanonical scopes never surface as history"
+    assert_equal 150, changes.first.new_value
+    assert_match(/unknown action/, err)
+    assert_match(/not canonical/, err)
+  end
+
   def test_rows_are_append_only_through_active_record
     Dials.set(:merchant_fee_bps, 150, actor: ACTOR)
     row = entries.sole

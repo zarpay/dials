@@ -296,7 +296,11 @@ aborted outer transaction); the cache keeps a last-known-good snapshot
 across busts so a database blip right after a write degrades reads instead
 of raising; MySQL identity columns get a binary collation in the migration;
 quarantine covers unknown actions and noncanonical scopes; and dial keys
-must be callable identifiers.
+must be callable identifiers. A third verification pass then caught the one
+regression the fixes themselves introduced — tombstone scopes skipped
+validation, so a corrupt clear row could crash `Dials.overview` — and
+aligned history's quarantine rules with state's, so the two views can never
+disagree about which rows are valid.
 
 ## Validation happens at write time, not read time
 

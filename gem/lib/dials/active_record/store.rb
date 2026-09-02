@@ -53,8 +53,13 @@ module Dials
           when "clear"
             # Tombstones carry no value but DO carry the stream's stale-write
             # stamp — an "absent" token must go stale when set/clear activity
-            # happened since it was read.
-            (row_versions[row.key.to_sym] ||= {})[row.scope] = row.seq
+            # happened since it was read. Their scopes are validated like any
+            # other row's: a malformed tombstone scope must be quarantined
+            # here, not crash Dials.overview when it tries to parse the stamp
+            # map later.
+            if row.scope == Scope::GLOBAL || valid_scope_string?(row.key, row.scope)
+              (row_versions[row.key.to_sym] ||= {})[row.scope] = row.seq
+            end
             next
           when "set"
             nil # fall through to the value path
@@ -167,10 +172,26 @@ module Dials
         previous = predecessors_of(rows)
 
         rows.filter_map do |row|
+          # History applies the same quarantine rules as state: an unknown
+          # action or a noncanonical scope is a row written around the gem,
+          # and the two views must agree on which rows are valid.
+          unless %w[set clear].include?(row.action)
+            next quarantine("dials(id #{row.id})", "unknown action #{row.action.inspect}")
+          end
+
+          parsed_scope =
+            if row.scope == Scope::GLOBAL
+              nil
+            elsif valid_scope_string?(row.key, row.scope)
+              Scope.parse(row.scope)
+            else
+              next nil
+            end
+
           pred = previous[[row.key, row.scope, row.seq - 1]]
           ChangeRecord.new(
             key: row.key.to_sym,
-            scope: row.scope == Scope::GLOBAL ? nil : Scope.parse(row.scope),
+            scope: parsed_scope,
             action: row.action,
             old_value: pred && pred.action == "set" ? decode(pred.value) : nil,
             new_value: row.action == "set" ? decode(row.value) : nil,

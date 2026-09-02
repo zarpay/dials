@@ -15,7 +15,10 @@
   migration gives MySQL identity columns a binary collation. Quarantine now
   also catches unknown actions and noncanonical scopes; `changes` fetches
   predecessors with per-stream predicates; dial keys must be plain callable
-  identifiers.
+  identifiers. A verification pass on the fixes closed the one regression
+  they introduced (tombstone scopes skipped validation and a corrupt clear
+  row could crash `Dials.overview`) and gave history the same quarantine
+  rules as state.
 - **Breaking: the log is the state — one append-only table.** Adopted from
   PR #1's minimal-implementation exploration (thanks @fractaledmind), with
   one addition that closes its acknowledged race: `seq` numbers each
