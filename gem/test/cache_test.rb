@@ -165,4 +165,20 @@ class CacheTest < Minitest::Test
     Dials.configure { |c| c.store = :memory }
     assert_equal 100, Dials.get(:fee), "a fresh store has no overrides"
   end
+
+  def test_a_failed_rebuild_after_a_write_serves_last_known_good
+    assert_equal 100, Dials.get(:fee) # builds the first snapshot
+
+    Dials.set(:fee, 5, actor: "cache-test") # busts the published snapshot
+
+    # The very next rebuild fails (database blip). Reads must degrade to the
+    # last snapshot this process ever built — not raise.
+    flaky = Dials.store
+    def flaky.state = raise("db down")
+
+    value = nil
+    _out, err = capture_io { value = Dials.get(:fee) }
+    assert_includes [100, 5], value, "serves honest (possibly stale) data instead of raising"
+    assert_match(/last-known-good/, err)
+  end
 end

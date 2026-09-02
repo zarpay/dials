@@ -49,7 +49,19 @@ module Dials
         scoped = {}
         row_versions = {}
         newest_rows.each do |row|
-          next if row.action == "clear"
+          case row.action
+          when "clear"
+            # Tombstones carry no value but DO carry the stream's stale-write
+            # stamp — an "absent" token must go stale when set/clear activity
+            # happened since it was read.
+            (row_versions[row.key.to_sym] ||= {})[row.scope] = row.seq
+            next
+          when "set"
+            nil # fall through to the value path
+          else
+            quarantine("dials(#{row.key}, #{row.scope})", "unknown action #{row.action.inspect}")
+            next
+          end
 
           value = decode_row(row.value, "dials(#{row.key}, #{row.scope})")
           next if value.equal?(SKIP)
@@ -80,14 +92,13 @@ module Dials
         [count, max]
       end
 
-      # The stale-write stamp of one override: the seq of its stream's
-      # newest row when that row is live ("set"), or 0 when the override is
-      # absent (never written, or newest row is a clear) — the
-      # StoreVersion::ABSENT state. The facade reads this after a CAS write
-      # to hand the caller the token for chaining.
+      # The stale-write stamp of one override stream: the seq of its newest
+      # row, LIVE OR TOMBSTONE — a cleared override keeps its clear row's
+      # stamp, so an absent → set → clear cycle can never make an old
+      # "absent" token current again (no ABA). Only a stream with no rows at
+      # all is 0, the StoreVersion::ABSENT state.
       def override_version(key, canonical_scope)
-        row = newest(key, canonical_scope)
-        live?(row) ? row.seq : 0
+        newest(key, canonical_scope)&.seq || 0
       end
 
       # True when the current thread's connection is inside an open
@@ -115,15 +126,20 @@ module Dials
       end
 
       # The two mutations. `canonical_scope` is always a canonical string —
-      # Scope::GLOBAL for the global override.
+      # Scope::GLOBAL for the global override. Both return [result, seq]:
+      # the usual result (previous value / did-anything-exist) plus the
+      # stream's seq after the write, so the facade can mint the caller's
+      # next token from the row it KNOWS was written — never from a second
+      # read that a concurrent writer could slip in front of.
       def set_override(key, canonical_scope, value, actor, expected_version: nil)
-        write do
+        write(expected_version) do
           row = newest(key, canonical_scope)
-          assert_version!(expected_version, live?(row) ? row.seq : 0)
+          assert_version!(expected_version, row&.seq || 0)
 
           old = live?(row) ? decode(row.value) : nil
-          append(key, canonical_scope, (row&.seq || 0) + 1, "set", encode(value), actor)
-          old
+          seq = (row&.seq || 0) + 1
+          append(key, canonical_scope, seq, "set", encode(value), actor)
+          [old, seq]
         end
       end
 
@@ -133,13 +149,14 @@ module Dials
       # nothing (but the version comparison, if requested, already ran: a
       # stale no-op is still stale).
       def clear_override(key, canonical_scope, actor, expected_version: nil)
-        write do
+        write(expected_version) do
           row = newest(key, canonical_scope)
-          assert_version!(expected_version, live?(row) ? row.seq : 0)
-          next false unless live?(row)
+          assert_version!(expected_version, row&.seq || 0)
+          next [false, row&.seq || 0] unless live?(row)
 
-          append(key, canonical_scope, row.seq + 1, "clear", nil, actor)
-          true
+          seq = row.seq + 1
+          append(key, canonical_scope, seq, "clear", nil, actor)
+          [true, seq]
         end
       end
 
@@ -208,25 +225,28 @@ module Dials
         )
       end
 
-      # The predecessor row (seq - 1) for each listed change, fetched in one
-      # over-inclusive query and indexed exactly — old_value is derived from
-      # history itself, so history cannot disagree with what was actually
-      # replaced.
+      # The predecessor row (seq - 1) for each listed change, fetched with
+      # one exact predicate per stream (no Cartesian over-fetch across
+      # unrelated keys/scopes) — old_value is derived from history itself,
+      # so history cannot disagree with what was actually replaced.
       def predecessors_of(rows)
         wanted = rows.filter_map { |r| [r.key, r.scope, r.seq - 1] if r.seq > 1 }
         return {} if wanted.empty?
 
-        Entry.where(key: wanted.map(&:first).uniq, scope: wanted.map { |w| w[1] }.uniq,
-                    seq: wanted.map(&:last).uniq)
-             .index_by { |r| [r.key, r.scope, r.seq] }
+        wanted.group_by { |k, s, _| [k, s] }
+              .map { |(k, s), triples| Entry.where(key: k, scope: s, seq: triples.map(&:last)) }
+              .reduce(:or)
+              .index_by { |r| [r.key, r.scope, r.seq] }
       end
 
-      # The compare half of compare-and-swap. The comparison itself is a
-      # read; atomicity comes from the seq claim under UNIQUE(key, scope,
-      # seq): a writer that interleaves between this check and our INSERT
-      # takes our seq slot, our INSERT raises RecordNotUnique, and the
-      # re-run re-reads and lands here again — now seeing the interleaved
-      # write and raising StaleWrite. Nothing applied, nothing logged.
+      # The compare half of compare-and-swap; `current` is the stream's
+      # newest seq, tombstones included (ABSENT strictly means "this stream
+      # was never written"). The comparison itself is a read; atomicity
+      # comes from the seq claim under UNIQUE(key, scope, seq) — a writer
+      # that interleaves between this check and our INSERT takes our slot,
+      # our INSERT raises RecordNotUnique, and write() converts that
+      # directly to StaleWrite for CAS callers (a lost claim PROVES an
+      # interleaver). Nothing applied, nothing logged.
       def assert_version!(expected, current)
         return if expected.nil? || expected == StoreVersion.token(current)
 
@@ -235,24 +255,34 @@ module Dials
               "re-read (Dials.overview) and retry deliberately"
       end
 
-      # Retries re-run the WHOLE transaction with fresh reads — but only when
-      # we are NOT inside an application transaction: after a database error
-      # there, the outer transaction is in an aborted state (PostgreSQL) and
+      # A CAS write that loses its seq claim is STALE by definition — the
+      # lost claim proves a concurrent write landed after the version was
+      # read — so RecordNotUnique converts straight to StaleWrite, with no
+      # retry and no re-read (correct even inside an aborted outer
+      # transaction, where re-reading is impossible). Unconditional writes
+      # re-run the WHOLE transaction with fresh reads — but only when we are
+      # NOT inside an application transaction: after a database error there,
+      # the outer transaction is in an aborted state (PostgreSQL) and
       # re-running statements would fail differently — the error must
       # propagate to whoever owns that transaction. A seq claim that loses
       # every attempt surfaces as WriteConflict (unconditional writes racing
       # each other — essentially never at operator rates).
-      def write(&)
+      def write(expected_version, &)
         attempts = 0
         begin
           Entry.transaction(&)
-        rescue *RETRYABLE => e
-          attempts += 1
-          retry if attempts < WRITE_ATTEMPTS && !transaction_open?
-          if e.is_a?(::ActiveRecord::RecordNotUnique)
-            raise WriteConflict, "concurrent writes kept racing this override — safe to retry"
+        rescue ::ActiveRecord::RecordNotUnique
+          if expected_version
+            raise StaleWrite,
+                  "a concurrent write landed after version #{expected_version} was read — re-read (Dials.overview) and retry deliberately"
           end
 
+          attempts += 1
+          retry if attempts < WRITE_ATTEMPTS && !transaction_open?
+          raise WriteConflict, "concurrent writes kept racing this override — safe to retry"
+        rescue ::ActiveRecord::TransactionRollbackError
+          attempts += 1
+          retry if attempts < WRITE_ATTEMPTS && !transaction_open?
           raise
         end
       end
@@ -287,14 +317,21 @@ module Dials
 
       # For non-global streams only — the global's "{}" was matched before
       # this runs, so an empty object here is corrupt (a hand-written row).
+      # Canonical exactness is required, not just shape: a noncanonical
+      # spelling ({"b":1,"a":2}, spaces, non-string values) would be a
+      # stream the resolver can never match against a canonicalized request.
       def valid_scope_string?(key, scope)
         parsed = JSON.parse(scope)
-        return true if parsed.is_a?(Hash) && !parsed.empty?
+        unless parsed.is_a?(Hash) && !parsed.empty?
+          quarantine("dials(#{key})", "scope #{scope.inspect} is not a non-empty JSON object")
+          return false
+        end
+        return true if Scope.canonical(Scope.parse(scope)) == scope
 
-        quarantine("dials(#{key})", "scope #{scope.inspect} is not a non-empty JSON object")
+        quarantine("dials(#{key})", "scope #{scope.inspect} is not canonical")
         false
-      rescue JSON::ParserError
-        quarantine("dials(#{key})", "scope #{scope.inspect} is not valid JSON")
+      rescue JSON::ParserError, InvalidScope
+        quarantine("dials(#{key})", "scope #{scope.inspect} is not a valid canonical scope")
         false
       end
 

@@ -32,10 +32,12 @@ module Dials
   #     write for a full TTL. The generation counter detects this and drops
   #     the stale publish (the requesting reader still gets the built
   #     snapshot; the next reader rebuilds fresh).
-  #   - Once a snapshot exists, probe and rebuild failures serve
-  #     last-known-good (with a warning) rather than raising — a database
-  #     blip must not take down every dial read. With no snapshot at all,
-  #     failures raise: there is nothing honest to serve.
+  #   - Once a snapshot has EVER been built, probe and rebuild failures
+  #     serve last-known-good (with a warning) rather than raising — a
+  #     database blip must not take down every dial read, including the read
+  #     right after a local write busted the current snapshot. Only a cold
+  #     process that has never built one raises: nothing honest exists to
+  #     serve there.
   class Cache
     def initialize(store:, ttl: 5.0)
       @store = store
@@ -43,6 +45,7 @@ module Dials
       @build_mutex = Mutex.new
       @state_mutex = Mutex.new # guards @generation/@snapshot writes; never held across store calls
       @snapshot = nil
+      @last_good = nil
       @probed_at = nil
       @generation = 0
     end
@@ -51,7 +54,7 @@ module Dials
 
     def snapshot
       current = @snapshot
-      return build_and_publish if current.nil?
+      return build_or_last_good if current.nil?
       return current unless probe_due?
 
       # Claim the probe slot up front: concurrent readers crossing the TTL
@@ -76,6 +79,9 @@ module Dials
       Snapshot.new(**@store.state)
     end
 
+    # Busting discards the published snapshot but NOT the last-known-good
+    # copy: if the rebuild after a write fails, reads degrade to slightly
+    # stale values instead of exceptions.
     def bust!
       @state_mutex.synchronize do
         @generation += 1
@@ -94,10 +100,23 @@ module Dials
       last.nil? || (monotonic_now - last) >= @ttl
     end
 
-    # Cold start: build without any lock. Concurrent cold readers each build
-    # once (a bounded, once-per-boot herd against two small tables); the last
-    # assignment wins with a valid snapshot either way. Failures raise —
-    # there is no last-known-good yet.
+    # No published snapshot (cold start, or just busted by a write): build,
+    # and on failure fall back to the last snapshot this process ever built —
+    # a database blip right after a write must not turn every dial read into
+    # an exception. A truly cold process (nothing ever built) raises.
+    def build_or_last_good
+      build_and_publish
+    rescue StandardError => e
+      last = @last_good
+      raise if last.nil?
+
+      warn "[dials] snapshot rebuild failed; serving last-known-good (#{e.class}: #{e.message})"
+      last
+    end
+
+    # Build without any lock. Concurrent cold readers each build once (a
+    # bounded, once-per-boot herd against one small table); the last
+    # assignment wins with a valid snapshot either way.
     def build_and_publish
       generation = @state_mutex.synchronize { @generation }
       built = Snapshot.new(**@store.state)
@@ -106,7 +125,10 @@ module Dials
       # otherwise this snapshot predates a write and must not become the
       # shared state. Check and assignment share the state mutex so a bust!
       # cannot slip between them. The caller still gets the built snapshot.
+      # Either way the build becomes last-known-good: even a snapshot that
+      # predates a concurrent write is honest data — exactly what LKG serves.
       @state_mutex.synchronize do
+        @last_good = built
         if generation == @generation
           @probed_at = monotonic_now
           @snapshot = built

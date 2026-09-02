@@ -200,10 +200,13 @@ module Dials
         normalized = Scope.validate!(definition, scope, exact: true)
         canonical = Scope.canonical(normalized)
       end
-      store.set_override(definition.key, canonical, value, actor_attrs, expected_version: expected_version)
+      _old, written = store.set_override(definition.key, canonical, value, actor_attrs,
+                                         expected_version: expected_version)
 
       after_write
-      expected_version ? StoreVersion.token(store.override_version(definition.key, canonical)) : value
+      # The token comes from the write we KNOW happened — never from a
+      # second read a concurrent writer could slip in front of.
+      expected_version ? StoreVersion.token(written) : value
     end
 
     # Remove an override by key — the primitive under the generated
@@ -215,8 +218,9 @@ module Dials
     # `expected_version:` works exactly as on set — the staleness check runs
     # even when the clear would be a no-op (a page that shows an override
     # which no longer exists IS stale), and a CAS clear returns the
-    # override's new token (Dials::ABSENT_VERSION, since it is now gone)
-    # instead of the boolean.
+    # tombstone's token instead of the boolean (chainable: a later set
+    # carrying it succeeds; an "absent" assertion from an older page does
+    # not — cleared is not the same as never-written).
     def clear(key, actor:, scope: nil, expected_version: nil)
       definition = registry.fetch(key)
       actor_attrs = Actor.normalize(actor)
@@ -227,11 +231,11 @@ module Dials
         normalized = Scope.validate!(definition, scope, exact: true)
         canonical = Scope.canonical(normalized)
       end
-      removed = store.clear_override(definition.key, canonical, actor_attrs,
-                                     expected_version: expected_version)
+      removed, written = store.clear_override(definition.key, canonical, actor_attrs,
+                                              expected_version: expected_version)
 
       after_write
-      expected_version ? StoreVersion.token(store.override_version(definition.key, canonical)) : removed
+      expected_version ? StoreVersion.token(written) : removed
     end
 
     private

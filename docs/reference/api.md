@@ -216,8 +216,13 @@ Dials.clear_checkout_fee_bps(actor: admin, expected_version: token)
 
 Tokens are opaque: obtain them from `overview` or a CAS write's return value
 and echo them back — never construct or parse one (`Dials::ABSENT_VERSION`
-is the one well-known constant). `expected_version` is a reserved dimension
-name, like `actor`. Passing nothing keeps unconditional last-write-wins, and
+is the one well-known constant, and it strictly means "never written":
+cleared overrides keep a tombstone token, so an old "absent" assertion goes
+stale the moment any set/clear touches the stream — no ABA). A CAS clear
+returns the tombstone's token, which chains into a later set. A token minted
+inside a database transaction that rolls back is void — it describes a write
+that never happened. `expected_version` is a reserved dimension name, like
+`actor`. Passing nothing keeps unconditional last-write-wins, and
 unconditional writes keep their usual return values (the value for set, the
 boolean for clear). The staleness check runs even when a clear would be a
 no-op — a page showing an override that no longer exists is stale.
@@ -291,7 +296,8 @@ A store is any object implementing the interface documented in
 [`Dials::Stores::Memory`](https://github.com/zarpay/dials/blob/main/gem/lib/dials/stores/memory.rb)
 (`state`, `version`, `override_version`, `set_override`, `clear_override`,
 `changes` — the global override is the one at `Scope::GLOBAL`, the canonical
-empty scope). Shipped: `Stores::Memory` (default) and
+empty scope; the write methods return `[result, stamp]` so tokens come from
+the write itself, never a second read). Shipped: `Stores::Memory` (default) and
 `Stores::ActiveRecordStore` (via `require "dials/active_record"`).
 
 ## Generator

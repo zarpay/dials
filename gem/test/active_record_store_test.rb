@@ -190,7 +190,7 @@ class ActiveRecordStoreTest < Minitest::Test
     _out, err = capture_io do
       assert_equal 90, Dials.get(:merchant_fee_bps, market: "KE")
     end
-    assert_match(/not valid JSON/, err)
+    assert_match(/not a valid canonical scope/, err)
   end
 
   def test_uncommitted_writes_never_poison_the_shared_cache
@@ -255,6 +255,26 @@ class ActiveRecordStoreTest < Minitest::Test
     assert_match(/skipping corrupt row/, err)
   end
 
+  def test_noncanonical_scopes_and_unknown_actions_are_quarantined
+    Dials.set(:merchant_fee_bps, 90, scope: { market: "KE" }, actor: ACTOR)
+    entries.insert_all!([
+                          # Valid JSON object, but not the canonical spelling — the
+                          # resolver could never match it against a canonical request.
+                          { key: "merchant_fee_bps", scope: '{ "market" : "NG" }', seq: 1,
+                            action: "set", value: "55", created_at: Time.now.utc },
+                          { key: "merchant_fee_bps", scope: '{"market":"BD"}', seq: 1,
+                            action: "sett", value: "66", created_at: Time.now.utc }
+                        ])
+    Dials.reload!
+
+    _out, err = capture_io do
+      assert_equal 90, Dials.merchant_fee_bps(market: "KE"), "healthy stream unaffected"
+      assert_equal 100, Dials.merchant_fee_bps(market: "BD"), "unknown-action row is not served"
+    end
+    assert_match(/not canonical/, err)
+    assert_match(/unknown action/, err)
+  end
+
   def test_rows_are_append_only_through_active_record
     Dials.set(:merchant_fee_bps, 150, actor: ACTOR)
     row = entries.sole
@@ -288,9 +308,24 @@ class ActiveRecordStoreTest < Minitest::Test
     token = Dials.adjust_merchant_fee_bps(300, actor: ACTOR, expected_version: token)
     assert_equal 300, Dials.merchant_fee_bps(market: "KE")
 
-    # A CAS clear returns ABSENT (the live override is gone).
+    # A CAS clear returns the tombstone's token — cleared ≠ never-written —
+    # and it chains into the next write.
     token = Dials.clear_merchant_fee_bps(actor: ACTOR, expected_version: token)
-    assert_equal Dials::ABSENT_VERSION, token
+    refute_equal Dials::ABSENT_VERSION, token
+    Dials.adjust_merchant_fee_bps(250, actor: ACTOR, expected_version: token)
+    assert_equal 250, Dials.merchant_fee_bps(market: "KE")
+  end
+
+  def test_a_lost_cas_seq_claim_raises_stale_write_not_conflict
+    # A lost claim PROVES an interleaver, so CAS maps RecordNotUnique
+    # straight to StaleWrite — no retry that would recompute and "succeed".
+    raiser = ->(*, **) { raise ActiveRecord::RecordNotUnique, "duplicate seq" }
+    Dials::ActiveRecord::Entry.stub(:create!, raiser) do
+      assert_raises(Dials::StaleWrite) do
+        Dials.adjust_merchant_fee_bps(200, actor: ACTOR, expected_version: Dials::ABSENT_VERSION)
+      end
+    end
+    assert_equal 0, entries.count
   end
 
   def test_tokens_are_stream_seqs_so_recreation_never_reuses_one

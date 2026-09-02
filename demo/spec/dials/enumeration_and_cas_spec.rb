@@ -51,9 +51,23 @@ RSpec.describe "Dial enumeration and stale-write protection", type: :model do
       token = Dials.adjust_checkout_fee_bps(310, actor: actor, expected_version: token)
       token = Dials.clear_checkout_fee_bps(actor: actor, expected_version: token)
 
-      expect(token).to eq(Dials::ABSENT_VERSION) # the override is gone again
+      # A CAS clear returns the tombstone's token — cleared ≠ never-written —
+      # and it chains into the next write.
+      expect(token).not_to eq(Dials::ABSENT_VERSION)
       expect(Dials.checkout_fee_bps(market: "KE")).to eq(250)
       expect(Dials.changes.length).to eq(3)
+
+      Dials.adjust_checkout_fee_bps(320, actor: actor, expected_version: token)
+      expect(Dials.checkout_fee_bps(market: "KE")).to eq(320)
+    end
+
+    it "refuses an old absent assertion after a set and clear happened (no ABA)" do
+      Dials.adjust_checkout_fee_bps(300, actor: actor)
+      Dials.clear_checkout_fee_bps(actor: actor)
+
+      expect do
+        Dials.adjust_checkout_fee_bps(999, actor: actor, expected_version: Dials::ABSENT_VERSION)
+      end.to raise_error(Dials::StaleWrite)
     end
 
     it "refuses a stale write with nothing applied and nothing logged" do

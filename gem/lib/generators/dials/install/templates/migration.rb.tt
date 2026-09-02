@@ -17,9 +17,14 @@ class CreateDialsTables < ActiveRecord::Migration[<%= ActiveRecord::Migration.cu
     #
     # Explicit column limits keep the composite unique index inside every
     # supported database's index budget (MySQL utf8mb4 in particular).
+    # On MySQL, the default case-insensitive collation would merge streams
+    # whose scopes differ only by case ("KE" vs "ke") — identity columns get
+    # a binary collation there. PostgreSQL and SQLite compare bytes already.
+    identity_collation = ("utf8mb4_bin" if connection.adapter_name.match?(/mysql/i))
+
     create_table :dials do |t|
-      t.string :key, null: false, limit: 100
-      t.string :scope, null: false, limit: 255
+      t.string :key, null: false, limit: 100, collation: identity_collation
+      t.string :scope, null: false, limit: 255, collation: identity_collation
       t.bigint :seq, null: false
       t.string :action, null: false
       t.text :value

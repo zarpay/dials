@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+- **Stale-write hardening (second adversarial review).** Cleared overrides
+  keep a tombstone token, so `Dials::ABSENT_VERSION` strictly means "never
+  written" and an old absent assertion goes stale when set/clear activity
+  happened since (closes an ABA present since the guarded-row design); a CAS
+  clear returns the tombstone's token (chainable). CAS tokens are minted
+  from the write itself — store write methods return `[result, stamp]` —
+  never from a follow-up read a concurrent writer could front-run. A lost
+  seq claim on a CAS write converts directly to `StaleWrite`. The cache
+  retains a last-known-good snapshot across busts, so a database blip right
+  after a write serves slightly-stale data instead of raising. The install
+  migration gives MySQL identity columns a binary collation. Quarantine now
+  also catches unknown actions and noncanonical scopes; `changes` fetches
+  predecessors with per-stream predicates; dial keys must be plain callable
+  identifiers.
 - **Breaking: the log is the state — one append-only table.** Adopted from
   PR #1's minimal-implementation exploration (thanks @fractaledmind), with
   one addition that closes its acknowledged race: `seq` numbers each

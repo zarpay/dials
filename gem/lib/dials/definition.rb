@@ -29,6 +29,11 @@ module Dials
     # names sane).
     MAX_KEY_LENGTH = 100
 
+    # Keys become method names (the bare reader, adjust_<key>, clear_<key>),
+    # so they must be plain callable identifiers — no spaces, hyphens,
+    # question marks, or leading digits.
+    KEY_FORMAT = /\A[a-zA-Z_][a-zA-Z0-9_]*\z/
+
     attr_reader :key, :default, :type, :label, :unit, :description, :dimensions, :schema
 
     def initialize(key, default:, type:, label: nil, unit: nil, description: nil,
@@ -149,6 +154,11 @@ module Dials
     def validate_definition!
       if key.length > MAX_KEY_LENGTH
         raise InvalidDefinition, "#{key}: key exceeds #{MAX_KEY_LENGTH} characters"
+      end
+      unless KEY_FORMAT.match?(key.to_s)
+        raise InvalidDefinition,
+              "#{key.inspect}: key must be a plain identifier (letters, digits, underscores; " \
+              "it becomes the dial's method names)"
       end
 
       names = dimension_names

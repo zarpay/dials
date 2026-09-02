@@ -20,9 +20,15 @@ module Dials
       JSON.generate(raw).freeze
     end
 
-    # The token of a row that does not exist. Passing it as expected_version:
-    # means "I saw no override here" — the write succeeds only if that is
-    # still true.
+    # The token of an override stream that has NEVER been written. A cleared
+    # override is not ABSENT — its tombstone keeps a stamp (handed out by
+    # Dials.overview), so "absent because cleared" and "absent because never
+    # written" can never be confused, and an old ABSENT token goes stale the
+    # moment any write touches the stream.
+    #
+    # A token minted by a write inside a database transaction that later
+    # ROLLS BACK is void — it describes a write that never happened; discard
+    # it with the rest of the transaction's effects.
     ABSENT = token(0)
   end
 end

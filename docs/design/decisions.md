@@ -283,8 +283,20 @@ Two commitments carried through every shape: `StaleWrite` is deliberately
 excluded from the store's retry loop (a retried CAS would recompute against
 the new version and succeed, silently defeating the mechanism), and a stale
 no-op clear still refuses — a page showing an override that no longer exists
-is stale. The change log's count+max(id) remains the **cache probe's** clock;
-it was only ever the wrong thing to CAS against.
+is stale. The table's count+max(id) remains the **cache probe's** clock; it
+was only ever the wrong thing to CAS against.
+
+A second adversarial review (Codex, against the shipped v4) hardened the
+edges: tombstones keep their stamp so ABSENT strictly means "never written"
+(closing an absent → set → clear ABA that had existed, unnoticed, since v3);
+CAS tokens are minted from the write itself rather than a follow-up read a
+concurrent writer could front-run; a lost seq claim converts directly to
+StaleWrite (a lost claim proves an interleaver — correct even inside an
+aborted outer transaction); the cache keeps a last-known-good snapshot
+across busts so a database blip right after a write degrades reads instead
+of raising; MySQL identity columns get a binary collation in the migration;
+quarantine covers unknown actions and noncanonical scopes; and dial keys
+must be callable identifiers.
 
 ## Validation happens at write time, not read time
 

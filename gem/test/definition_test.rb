@@ -119,6 +119,13 @@ class DefinitionTest < Minitest::Test
     assert_match(/JSON Schema keywords/, error.message)
   end
 
+  def test_keys_must_be_callable_identifiers
+    assert_raises(Dials::InvalidDefinition) { build(:'bad key') }
+    assert_raises(Dials::InvalidDefinition) { build(:'fee-bps') }
+    assert_raises(Dials::InvalidDefinition) { build(:'9lives') }
+    assert_raises(Dials::InvalidDefinition) { build(:fee?) }
+  end
+
   def test_default_label_from_key
     assert_equal "Merchant fee bps", build(:merchant_fee_bps).label
   end

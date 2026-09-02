@@ -34,8 +34,42 @@ class CasTest < Minitest::Test
     token = Dials.adjust_merchant_fee_bps(300, actor: ACTOR, expected_version: token)
     token = Dials.clear_merchant_fee_bps(actor: ACTOR, expected_version: token)
 
-    assert_equal Dials::ABSENT_VERSION, token, "a CAS clear returns the absent token — the row is gone"
+    refute_equal Dials::ABSENT_VERSION, token,
+                 "a CAS clear returns the TOMBSTONE's token — cleared is not never-written"
     assert_equal 100, Dials.merchant_fee_bps(market: "KE") # back to the default
+
+    # The tombstone token chains: a set carrying it succeeds.
+    Dials.adjust_merchant_fee_bps(250, actor: ACTOR, expected_version: token)
+    assert_equal 250, Dials.merchant_fee_bps(market: "KE")
+  end
+
+  def test_an_absent_token_goes_stale_when_set_and_clear_happened_since
+    # The ABA case: the page saw "no override"; someone set AND cleared it
+    # since. The state is absent again, but the picture is stale — an old
+    # ABSENT assertion must not silently win.
+    Dials.adjust_merchant_fee_bps(200, actor: ACTOR)
+    Dials.clear_merchant_fee_bps(actor: ACTOR)
+
+    assert_raises(Dials::StaleWrite) do
+      Dials.adjust_merchant_fee_bps(999, actor: ACTOR, expected_version: Dials::ABSENT_VERSION)
+    end
+  end
+
+  def test_overview_hands_out_tombstone_tokens_for_cleared_overrides
+    Dials.adjust_merchant_fee_bps(200, actor: ACTOR)
+    Dials.adjust_merchant_fee_bps(90, actor: ACTOR, market: "BD")
+    Dials.clear_merchant_fee_bps(actor: ACTOR)
+    Dials.clear_merchant_fee_bps(actor: ACTOR, market: "BD")
+
+    state = state_of(:merchant_fee_bps)
+    refute state.global_override?
+    refute_equal Dials::ABSENT_VERSION, state.global_version, "cleared global carries its tombstone token"
+    assert state.scoped_overrides.empty?
+    refute_nil state.scoped_override_versions[{ market: "BD" }], "cleared scopes keep their tombstone token"
+
+    # And the tombstone token is the live expectation for the next write.
+    Dials.adjust_merchant_fee_bps(300, actor: ACTOR, expected_version: state.global_version)
+    assert_equal 300, Dials.merchant_fee_bps(market: "KE")
   end
 
   def test_overview_carries_the_token_for_each_stored_override

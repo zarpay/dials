@@ -21,9 +21,12 @@ module Dials
   #
   # `global_version` and `scoped_override_versions` are the per-override
   # stale-write tokens: echo the one for the override you are writing as
-  # `expected_version:`. A missing entry (or a global_version of
-  # Dials::ABSENT_VERSION) means "no override stored" — pass
-  # Dials::ABSENT_VERSION to assert it is still absent when you write.
+  # `expected_version:`. Cleared overrides keep a TOMBSTONE token (the
+  # stream's clear stamp) — so `scoped_override_versions` can carry entries
+  # for scopes with no value in `scoped_overrides`, and `global_version` is
+  # Dials::ABSENT_VERSION only when the global was never written at all.
+  # For an override with no token listed anywhere, pass
+  # Dials::ABSENT_VERSION to assert it has never been written.
   DialState = Data.define(:definition, :global_override, :global_value, :global_version,
                           :scoped_overrides, :scoped_override_versions) do
     def key
