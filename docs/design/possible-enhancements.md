@@ -63,24 +63,14 @@ what's actually common across them. An engine extracted from real surfaces
 beats one designed in advance — and it would live as a separate opt-in
 package (`dials-admin`), never in the core gem.
 
-## ~~Stale-write protection (compare-and-swap)~~ — shipped
-
-This page predicted it would be "the first item to graduate", and it was:
-the first real dashboard needed the guarantee, which chose the shape —
-`expected_version:` on every write path, carrying the written override's
-opaque version token from `Dials.overview`, with a mismatch raising
-`Dials::StaleWrite`. See the
-[API Reference](/reference/api#writing) and the design notes in
-[Design Decisions](/design/decisions).
-
 ## Disabling the change log
 
 **The idea.** A mode for apps that want dials without history.
 
-**Why it waits — and now definitionally never.** Since the log became the
-state (the append-only table's rows ARE the current overrides, the history,
-and the cache's version counter), "dials without history" is no longer a
-mode the storage could offer — deleting history would delete the state.
+**Why it never will happen.** The log is the state: the append-only table's
+rows ARE the current overrides, the history, and the cache's version
+counter, so "dials without history" is not a mode the storage could offer —
+deleting history would delete the state.
 The motivations dissolve on inspection anyway: attribution never needed a
 User model (string actors; `config.default_actor` makes `actor:` optional),
 a PII concern is answered by `config.default_actor = "anonymous"`, and at
@@ -95,7 +85,6 @@ timestamp.
 
 **What already exists.** Everything: storage is append-only, so the state at
 time T is exactly "rows with created_at ≤ T, newest seq per stream wins".
-This became cheap the moment the log became the state.
 
 **Why it waits.** No surface has asked for it yet. When one does, the open
 questions are API shape (a scoped `Dials.as_of(time) { ... }` block vs.

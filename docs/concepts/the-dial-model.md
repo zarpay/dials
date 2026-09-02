@@ -75,12 +75,6 @@ That single mechanism is also what makes
 [stale-write protection](/reference/api#expected-version-stale-write-protection)
 atomic against every concurrent write.
 
-Earlier iterations used two mutable tables, then one. Why the shape kept
-simplifying — and why the original choice was right in the system this
-pattern came from — is recorded honestly in
-[Design Decisions](/design/decisions), with credit to the PR that proposed
-the append-only form.
-
 ## `false` is a value
 
 The gem's validation never confuses "no value" with `false`:
