@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/zarpay/dials/actions/workflows/ci.yml/badge.svg)](https://github.com/zarpay/dials/actions/workflows/ci.yml)
 [![License](https://img.shields.io/github/license/zarpay/dials)](https://github.com/zarpay/dials/blob/main/LICENSE.txt)
-[![Ruby](https://img.shields.io/badge/Ruby-%3E%3D%203.2-red)](https://rubygems.org)
+[![Ruby](https://img.shields.io/badge/Ruby-%3E%3D%203.2-blue)](https://rubygems.org)
 
 `dials` is a Ruby gem for operator-adjustable values: constants you can turn
 without a deploy. A dial is declared in code with a default, a type,
