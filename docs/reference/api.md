@@ -141,6 +141,12 @@ end
 
 All returned structures are frozen.
 
+### `Dials.changes(key: nil, limit: 50) → [ChangeRecord]`
+
+Newest-first history. `ChangeRecord` is a Data class:
+`key, scope, action ("set"/"clear"), old_value, new_value, actor_type,
+actor_id, actor_label, created_at`, plus `#global?`.
+
 ### `Dials.registry`
 
 Enumerable of `Dials::Definition`. Useful members for building UIs:
@@ -242,12 +248,6 @@ silent no-op (no log entry).
 The key-taking primitives under `adjust_<key>` / `clear_<key>`, for dynamic
 access. Scope travels as an explicit hash (`scope: { market: "BD" }`); both
 also raise `Dials::UnknownDial` for an undeclared key.
-
-### `Dials.changes(key: nil, limit: 50) → [ChangeRecord]`
-
-Newest-first history. `ChangeRecord` is a Data class:
-`key, scope, action ("set"/"clear"), old_value, new_value, actor_type,
-actor_id, actor_label, created_at`, plus `#global?`.
 
 ## Configuration
 
