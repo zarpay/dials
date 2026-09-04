@@ -3,10 +3,21 @@
 require "dials/active_record"
 
 Dials.configure do |config|
-  # Where values live. :active_record uses the tables created by
+  # Where values live. :active_record uses the table created by
   # `rails g dials:install`; :memory keeps everything in-process (handy in
   # test environments that never exercise persistence).
   config.store = :active_record
+
+<% if options[:table_name_prefix].empty? -%>
+  # Prefix the gem-owned table when "dials" collides with an existing one.
+  # Used verbatim, so include the trailing underscore. Must match the
+  # migration (`rails g dials:install --table-name-prefix=zar_`).
+  # config.table_name_prefix = "zar_"
+<% else -%>
+  # Names the gem-owned table <%= table_name %>, as created by the install
+  # migration.
+  config.table_name_prefix = "<%= options[:table_name_prefix] %>"
+<% end -%>
 
   # Seconds between cache staleness probes (one cheap query per process per
   # interval). 0 probes on every read; nil never probes.

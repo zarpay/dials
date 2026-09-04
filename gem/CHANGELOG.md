@@ -1,5 +1,14 @@
 # Changelog
 
+## [Unreleased]
+
+- **`config.table_name_prefix`.** Prefix the gem-owned table when `dials`
+  collides with an existing table — `config.table_name_prefix = "zar_"`
+  names it `zar_dials`. The prefix is used verbatim (trailing underscore
+  included), mirroring Rails' `table_name_prefix` convention. The install
+  generator takes the same prefix (`rails g dials:install
+  --table-name-prefix=zar_`) so the migration and initializer match.
+
 ## [0.1.0] - 2026-09-02
 
 Initial release.

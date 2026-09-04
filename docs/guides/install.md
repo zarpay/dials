@@ -20,6 +20,16 @@ The generator creates:
   nothing — see [Caching](/concepts/caching)).
 - **`config/initializers/dials.rb`** with a commented starter registry.
 
+If `dials` collides with an existing table in your app, pass
+`--table-name-prefix` and the generator prefixes the table (and sets
+`config.table_name_prefix` in the initializer) to match. The prefix is
+used verbatim — include the trailing underscore, as with Rails'
+`table_name_prefix`:
+
+```bash
+bin/rails generate dials:install --table-name-prefix=zar_   # creates zar_dials
+```
+
 ## 2. Configure and declare
 
 ```ruby
