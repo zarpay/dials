@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.2.0] - 2026-09-04
 
 - **`config.table_name_prefix`.** Prefix the gem-owned table when `dials`
   collides with an existing table — `config.table_name_prefix = "zar_"`
