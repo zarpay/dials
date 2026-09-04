@@ -257,8 +257,28 @@ Dials.configure do |config|
   config.cache_ttl = 5.0               # seconds; 0 = probe every read; nil = never
   config.actor_label = ->(actor) { }   # change-log label builder
   config.default_actor = nil           # fallback attribution; see below
+  config.table_name_prefix = nil       # "zar_" names the table zar_dials; see below
 end
 ```
+
+### `config.table_name_prefix`
+
+Prefix for the gem-owned table, when `dials` collides with an existing
+table. Used verbatim — include the trailing underscore, as with Rails'
+`table_name_prefix`:
+
+```ruby
+config.table_name_prefix = "zar_"   # the table is zar_dials
+```
+
+The migration must create the matching table; pass the same prefix to the
+install generator so both stay in step:
+
+```bash
+bin/rails generate dials:install --table-name-prefix=zar_
+```
+
+`nil` (the default) keeps `dials`.
 
 ### `config.default_actor`
 

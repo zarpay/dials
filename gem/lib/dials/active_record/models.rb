@@ -34,7 +34,11 @@ module Dials
     # "ke") as one stream — don't declare dimension enums that differ only
     # by case, or give the table a binary collation.
     class Entry < ::ActiveRecord::Base
-      self.table_name = "dials"
+      # Prefixable via Dials.configure { |c| c.table_name_prefix = "zar_" }
+      # for apps where "dials" collides with an existing table (see
+      # Config#table_name_prefix).
+      DEFAULT_TABLE_NAME = "dials"
+      self.table_name = DEFAULT_TABLE_NAME
 
       validates :key, :scope, :seq, presence: true
       validates :action, presence: true, inclusion: { in: %w[set clear] }

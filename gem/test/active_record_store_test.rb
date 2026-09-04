@@ -12,20 +12,24 @@ class ActiveRecordStoreTest < Minitest::Test
     ActiveRecord::Base.establish_connection(adapter: "sqlite3", database: ":memory:")
     ActiveRecord::Schema.verbose = false
     # Mirrors lib/generators/dials/install/templates/migration.rb.tt.
+    # :zar_dials is the same shape under a prefixed name, for the
+    # config.table_name_prefix tests.
     ActiveRecord::Schema.define do
-      create_table :dials do |t|
-        t.string :key, null: false, limit: 100
-        t.string :scope, null: false, limit: 255
-        t.bigint :seq, null: false
-        t.string :action, null: false
-        t.text :value
-        t.string :actor_type
-        t.string :actor_id
-        t.string :actor_label
-        t.datetime :created_at, null: false
+      %i[dials zar_dials].each do |name|
+        create_table name do |t|
+          t.string :key, null: false, limit: 100
+          t.string :scope, null: false, limit: 255
+          t.bigint :seq, null: false
+          t.string :action, null: false
+          t.text :value
+          t.string :actor_type
+          t.string :actor_id
+          t.string :actor_label
+          t.datetime :created_at, null: false
+        end
+        add_index name, %i[key scope seq], unique: true
+        add_index name, :key
       end
-      add_index :dials, %i[key scope seq], unique: true
-      add_index :dials, :key
     end
     @schema_ready = true
   end
@@ -308,6 +312,43 @@ class ActiveRecordStoreTest < Minitest::Test
     assert_equal 150, changes.first.new_value
     assert_match(/unknown action/, err)
     assert_match(/not canonical/, err)
+  end
+
+  # -- config.table_name_prefix ------------------------------------------------
+
+  def test_table_name_prefix_renames_the_table
+    Dials.configure { |c| c.table_name_prefix = "zar_" }
+    entries.delete_all
+
+    Dials.set(:merchant_fee_bps, 150, actor: ACTOR)
+
+    assert_equal "zar_dials", entries.table_name
+    assert_equal 150, Dials.get(:merchant_fee_bps, market: "KE")
+    assert_equal 1, entries.count
+    assert_equal 0, entries.connection.select_value("SELECT COUNT(*) FROM dials").to_i,
+                 "nothing lands in the default table"
+  ensure
+    Dials.config.table_name_prefix = nil
+  end
+
+  def test_table_name_prefix_applies_when_set_before_the_store
+    Dials.configure do |c|
+      c.table_name_prefix = "zar_"
+      c.store = :active_record
+    end
+    entries.delete_all
+
+    Dials.set(:merchant_fee_bps, 150, actor: ACTOR)
+    assert_equal "zar_dials", entries.table_name
+    assert_equal 1, entries.count
+  ensure
+    Dials.config.table_name_prefix = nil
+  end
+
+  def test_nil_table_name_prefix_restores_the_default
+    Dials.config.table_name_prefix = "zar_"
+    Dials.config.table_name_prefix = nil
+    assert_equal "dials", entries.table_name
   end
 
   def test_rows_are_append_only_through_active_record

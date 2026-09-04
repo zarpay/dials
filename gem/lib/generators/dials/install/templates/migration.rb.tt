@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-class CreateDialsTables < ActiveRecord::Migration[<%= ActiveRecord::Migration.current_version %>]
+class Create<%= table_name.camelize %>Table < ActiveRecord::Migration[<%= ActiveRecord::Migration.current_version %>]
   def change
     # The gem's ONE table, append-only: every write INSERTs a row, and the
     # newest row per (key, scope) stream is the current override — action
@@ -22,7 +22,7 @@ class CreateDialsTables < ActiveRecord::Migration[<%= ActiveRecord::Migration.cu
     # a binary collation there. PostgreSQL and SQLite compare bytes already.
     identity_collation = ("utf8mb4_bin" if connection.adapter_name.match?(/mysql/i))
 
-    create_table :dials do |t|
+    create_table :<%= table_name %> do |t|
       t.string :key, null: false, limit: 100, collation: identity_collation
       t.string :scope, null: false, limit: 255, collation: identity_collation
       t.bigint :seq, null: false
@@ -33,7 +33,7 @@ class CreateDialsTables < ActiveRecord::Migration[<%= ActiveRecord::Migration.cu
       t.string :actor_label
       t.datetime :created_at, null: false
     end
-    add_index :dials, [:key, :scope, :seq], unique: true
-    add_index :dials, :key
+    add_index :<%= table_name %>, [:key, :scope, :seq], unique: true
+    add_index :<%= table_name %>, :key
   end
 end
