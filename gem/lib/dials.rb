@@ -130,6 +130,26 @@ module Dials
       Resolver.resolve(definition, normalized, current_snapshot)
     end
 
+    # Read a dial's Global layer by key: the stored global override when
+    # present, else the code default — the tail every un-overridden scope
+    # falls through to. This is the front door for the caller that has NO
+    # scope to give — resolving a value for a subject whose dimension is
+    # unknowable (a recipient with no resolvable market) — not a way around
+    # exact-scope reads: a caller that knows its scope must still pass it
+    # to get, which raises InvalidScope precisely so a lazy read cannot
+    # skip a scoped override. For a dial with no dimensions this is
+    # equivalent to get. Raises UnknownDial; honors Testing pins.
+    def global(key)
+      definition = registry.fetch(key)
+
+      pinned = Testing.override_for(definition.key)
+      return pinned.first if pinned
+
+      # The empty scope matches no stored scoped override, so Resolver
+      # takes exactly the global-override → code-default tail.
+      Resolver.resolve(definition, {}, current_snapshot)
+    end
+
     # One dial's stored scoped overrides as { parsed scope => value }, e.g.
     # { { market: "BD" } => 24, { market: "NG" } => 48 } — "which markets
     # override this dial?". Scopes come back as parsed hashes, never

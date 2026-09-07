@@ -52,6 +52,13 @@ class TestingTest < Minitest::Test
     end
   end
 
+  def test_override_pins_global_reads_too
+    Dials::Testing.with_overrides(merchant_fee_bps: 250) do
+      assert_equal 250, Dials.global(:merchant_fee_bps)
+    end
+    assert_equal 100, Dials.global(:merchant_fee_bps)
+  end
+
   def test_overrides_do_not_touch_store_or_change_log
     Dials::Testing.with_overrides(merchant_fee_bps: 250) { Dials.get(:merchant_fee_bps, market: "KE") }
     assert_empty Dials.changes

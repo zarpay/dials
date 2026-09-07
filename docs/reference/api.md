@@ -101,6 +101,23 @@ The key-taking primitive under the bare `<key>` reader, for code that
 receives the key at runtime (an admin surface, a console). Same semantics;
 also raises `Dials::UnknownDial` for an undeclared key.
 
+### `Dials.global(key) → value`
+
+A dial's **Global layer**: the stored global override when present, else the
+code default — the tail every un-overridden scope falls through to.
+
+```ruby
+Dials.global(:checkout_fee_bps)   # never sees per-market overrides
+```
+
+This is the front door for the caller that has *no scope to give* — resolving
+a value for a subject whose dimension is unknowable (say, a recipient with no
+resolvable market). It is explicitly **not** a way around exact-scope reads:
+a caller that knows its scope must still pass it to `get`, which raises
+`Dials::InvalidScope` precisely so a lazy read cannot skip a scoped override.
+For a dial with no dimensions it is equivalent to `get`. Raises
+`Dials::UnknownDial`; honors `Dials::Testing.with_overrides` pins.
+
 ### `Dials.scoped_overrides(key) → { scope => value }`
 
 One dial's stored scoped overrides, keyed by **parsed** scope hashes (never
