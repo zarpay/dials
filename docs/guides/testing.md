@@ -53,7 +53,9 @@ An app with [namespaces](/guides/namespaces) resets all of them with
 wants `Dials.reset_namespaces!`, which discards every namespace but the
 root. Call both from one thread, between examples — like configuration
 itself, the reset hooks assume nothing else is reading or writing dials at
-that moment.
+that moment. A namespace object a reset discarded is finished: keep reading
+through `Dials.namespace(:name)` rather than a constant captured in an
+earlier example.
 
 ## The registry-integrity spec
 

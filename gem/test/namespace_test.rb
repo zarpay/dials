@@ -259,6 +259,21 @@ class NamespaceTest < Minitest::Test
     assert_raises(Dials::InvalidTableName) { Dials.configure { |c| c.table_name_prefix = "shipping_" } }
   end
 
+  def test_a_refused_name_leaves_the_namespace_on_the_table_it_had
+    assert_raises(Dials::InvalidTableName) { @payouts.configure { |c| c.table_name = "shipping_dials" } }
+    assert_raises(Dials::InvalidTableName) { Dials.configure { |c| c.table_name_prefix = "shipping_" } }
+
+    assert_equal "payouts_dials", @payouts.config.table_name
+    assert_equal "dials", Dials.config.table_name
+  end
+
+  def test_a_nil_table_name_restores_the_derived_one
+    @shipping.configure { |c| c.table_name = "engine_settings" }
+    @shipping.configure { |c| c.table_name = nil }
+
+    assert_equal "shipping_dials", @shipping.config.table_name
+  end
+
   def test_table_name_prefix_is_the_roots_alone
     error = assert_raises(Dials::Error) { @shipping.configure { |c| c.table_name_prefix = "ops_" } }
     assert_match(/config.table_name/, error.message)

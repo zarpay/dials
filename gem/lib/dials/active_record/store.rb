@@ -226,14 +226,18 @@ module Dials
 
       # Every stream's newest row, in one query. The correlated NOT EXISTS
       # is portable across PostgreSQL, MySQL, and SQLite (no window
-      # functions) and walks the (key, scope, seq) index.
+      # functions) and walks the (key, scope, seq) index. The table name is
+      # quoted by the adapter: this is the one place the gem writes SQL by
+      # hand, so a table named for a reserved word must not become a syntax
+      # error the first time a namespace loads its state.
       def newest_rows
+        table = @model.quoted_table_name
         @model.where(<<~SQL.squish)
           NOT EXISTS (
-            SELECT 1 FROM #{@model.table_name} newer
-            WHERE newer.key = #{@model.table_name}.key
-              AND newer.scope = #{@model.table_name}.scope
-              AND newer.seq > #{@model.table_name}.seq
+            SELECT 1 FROM #{table} newer
+            WHERE newer.key = #{table}.key
+              AND newer.scope = #{table}.scope
+              AND newer.seq > #{table}.seq
           )
         SQL
       end

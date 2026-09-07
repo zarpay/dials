@@ -12,8 +12,7 @@ module Admin
   #
   # Namespaces: every action takes an optional `namespace` param and acts on
   # that namespace, defaulting to the app's own. The index also lists every
-  # namespace, so the page can offer a subsystem picker without naming one —
-  # this is the whole of what an admin surface needs to know about them.
+  # namespace, so the page can offer a subsystem picker without naming one.
   #
   # Attribution: the authenticated admin is passed as actor: on every write.
   # Validation: the gem raises typed errors; they render as 422/404/409 here.
@@ -68,9 +67,8 @@ module Admin
 
     private
 
-    # The namespace this request acts on. Every read and write goes through
-    # it, so the same controller serves the app's dials and every
-    # subsystem's — a namespace answers the same API the Dials module does.
+    # A namespace answers the same API the Dials module does, so one
+    # controller serves the app's dials and every subsystem's.
     def dials
       params[:namespace].present? ? Dials.namespace(params[:namespace]) : Dials.default
     end

@@ -32,7 +32,7 @@ module Dials
       @store = nil
       @table_name = nil
       @table_name_prefix = nil
-      claim_table!
+      validate_table_name!(table_name)
     end
 
     # A store instance, or the symbols :memory / :active_record.
@@ -60,23 +60,23 @@ module Dials
     # The prefixed "dials" for the root, "<name>_dials" for every other
     # namespace, or whatever table_name= says.
     def table_name
-      return @table_name if @table_name
-      return "#{@table_name_prefix}#{DEFAULT_TABLE_NAME}" if @namespace.root?
-
-      "#{@namespace.name}_#{DEFAULT_TABLE_NAME}"
+      resolve_table_name(@table_name, @table_name_prefix)
     end
 
     # Both name setters are order-independent with kind=: whichever runs
-    # second applies the name.
+    # second applies the name, and nil on either restores the derived one.
+    # Each claims the name it would produce BEFORE taking it, so a rejected
+    # setter leaves the namespace on the table it already had.
     def table_name=(name)
-      @table_name = name.to_s
-      claim_table!
+      name = name&.to_s
+      claim_table!(resolve_table_name(name, @table_name_prefix))
+      @table_name = name
       rename_table
     end
 
     def table_name_prefix=(prefix)
+      claim_table!(resolve_table_name(@table_name, prefix))
       @table_name_prefix = prefix
-      claim_table!
       rename_table
     end
 
@@ -96,25 +96,27 @@ module Dials
 
     private
 
-    # A namespace owns its table outright, so a name it cannot own is a
-    # boot-time error: one that is not a plain identifier would reach raw
-    # SQL, and one another namespace already answers to would interleave two
-    # subsystems' keys, history and stale-write sequences in one stream with
-    # nothing to tell them apart.
-    def claim_table!
-      name = table_name
-      unless TABLE_NAME_FORMAT.match?(name) && name.length <= MAX_TABLE_NAME_LENGTH
-        raise InvalidTableName,
-              "#{name.inspect}: a dials table name must be lowercase letters, digits and " \
-              "underscores, at most #{MAX_TABLE_NAME_LENGTH} characters"
-      end
+    def resolve_table_name(name, prefix)
+      return name if name
+      return "#{prefix}#{DEFAULT_TABLE_NAME}" if @namespace.root?
 
-      claimed = Dials.namespaces.find { |other| !other.equal?(@namespace) && other.config.table_name == name }
-      return unless claimed
+      "#{@namespace.name}_#{DEFAULT_TABLE_NAME}"
+    end
+
+    # Renaming an already-declared namespace's table: the shape is this
+    # object's business, the claim is the module's, because only the module
+    # knows every namespace.
+    def claim_table!(name)
+      validate_table_name!(name)
+      Dials.assert_table_unclaimed!(@namespace, name)
+    end
+
+    def validate_table_name!(name)
+      return if TABLE_NAME_FORMAT.match?(name) && name.length <= MAX_TABLE_NAME_LENGTH
 
       raise InvalidTableName,
-            "namespace #{@namespace.name} would share the #{name.inspect} table with " \
-            "namespace #{claimed.name}; a namespace owns its table (config.table_name)"
+            "#{name.inspect}: a dials table name must be lowercase letters, digits and " \
+            "underscores, at most #{MAX_TABLE_NAME_LENGTH} characters"
     end
 
     def build_store(kind)

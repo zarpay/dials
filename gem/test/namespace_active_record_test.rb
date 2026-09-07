@@ -42,6 +42,17 @@ class NamespaceActiveRecordTest < Minitest::Test
     assert_equal 0, ActiveRecord::Base.connection.select_value("SELECT COUNT(*) FROM shipping_dials").to_i
   end
 
+  def test_a_table_named_for_a_reserved_word_still_loads_state
+    # The store writes one query by hand; an unquoted "order" would be a
+    # syntax error the first time the namespace read anything.
+    DialsTestSupport.sqlite_schema!(:order)
+    @shipping.configure { |c| c.table_name = "order" }
+
+    @shipping.adjust_timeout_seconds(60, actor: ACTOR)
+
+    assert_equal 60, @shipping.timeout_seconds
+  end
+
   def test_history_is_per_namespace
     @shipping.adjust_timeout_seconds(60, actor: ACTOR)
     @payouts.adjust_timeout_seconds(6, actor: ACTOR)

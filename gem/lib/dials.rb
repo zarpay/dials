@@ -100,9 +100,18 @@ module Dials
       namespace.configure(&block) if block
       NAMESPACE_LOCK.synchronize do
         assert_undeclared!(key)
+        assert_unclaimed_table!(namespace, namespace.config.table_name)
         @namespaces[key] = namespace
       end
       namespace
+    end
+
+    # Internal, called by Storage when a declared namespace is renamed. A
+    # namespace owns its table outright: two namespaces on one would
+    # interleave their keys, history and stale-write sequences with nothing
+    # to tell them apart again.
+    def assert_table_unclaimed!(namespace, table_name)
+      NAMESPACE_LOCK.synchronize { assert_unclaimed_table!(namespace, table_name) }
     end
 
     # Test hook: discard every namespace but the root, and with them their
@@ -211,13 +220,23 @@ module Dials
     def assert_undeclared!(key)
       raise DuplicateNamespace, "namespace #{key.inspect} is already declared" if @namespaces.key?(key)
     end
+
+    # Callers hold NAMESPACE_LOCK, so a name is claimed and published
+    # without another declaration slipping between the two.
+    def assert_unclaimed_table!(namespace, table_name)
+      claimed = @namespaces.each_value.find do |other|
+        !other.equal?(namespace) && other.config.table_name == table_name
+      end
+      return unless claimed
+
+      raise InvalidTableName,
+            "namespace #{namespace.name} would share the #{table_name.inspect} table with " \
+            "namespace #{claimed.name}; a namespace owns its table (config.table_name)"
+    end
   end
 
-  # Populated before the root exists: building a namespace asks which
-  # tables are already claimed.
-  @namespaces = {}
   @default = Namespace.new(Namespace::ROOT_NAME)
-  @namespaces[Namespace::ROOT_NAME] = @default
+  @namespaces = { Namespace::ROOT_NAME => @default }
 
   # The root namespace's in-transaction marker (see Namespace#after_write);
   # every namespace has one of its own.

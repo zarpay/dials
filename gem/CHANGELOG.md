@@ -32,14 +32,16 @@
   and `tier2` would derive the same model class, and the second namespace
   would silently repoint the first one's table.)
 - **`Dials::InvalidTableName`.** A table name must be lowercase letters,
-  digits and underscores, at most 63 characters — it reaches raw SQL
-  unquoted, and PostgreSQL truncates identifiers past 63 bytes — and no two
-  namespaces may resolve to one table. Both are checked at boot, on
-  `config.table_name`, `config.table_name_prefix`, and the name a namespace
-  derives from its own.
-- Configuration is boot-time only, now stated as such in the docs: declare
-  namespaces and configure `Dials` during boot, because reconfiguration
-  concurrent with live traffic is unsupported.
+  digits and underscores, at most 63 characters — a table the namespace owns
+  outright, not a schema-qualified or case-sensitive reference, and
+  PostgreSQL truncates identifiers past 63 bytes — and no two namespaces may
+  resolve to one table. Both are checked at boot, on `config.table_name`,
+  `config.table_name_prefix`, and the name a namespace derives from its own.
+- The ActiveRecord store quotes the table name in the one query it writes by
+  hand, so a table named for a reserved word (`order`) loads state instead of
+  raising a SQL syntax error on the first read.
+- Configuration is boot-time only: declare namespaces and configure `Dials`
+  during boot. Reconfiguration concurrent with live traffic is unsupported.
 - **`Dials.reload_all!`** reloads every namespace, and
   **`Dials.reset_namespaces!`** discards all but the root — for test suites.
 - The `Dials` module is now the default namespace: `Dials.define`,

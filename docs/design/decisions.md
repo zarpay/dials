@@ -81,15 +81,17 @@ the declaration.
 Two namespaces sharing one table is the one failure this shape cannot
 survive: their keys, history and stale-write sequences would interleave in
 the same rows with no discriminator to separate them again. So every way of
-arriving at a table is closed at boot, loudly. A namespace name is segments
+arriving at a table is checked at boot. A namespace name is segments
 of lowercase letters and digits each starting with a letter, which makes
 camelizing them reversible — `flat_rate` derives `FlatRateEntry` and nothing
 else does, where `flat_1` and `flat1` would both derive `Flat1Entry` and the
 second namespace would silently repoint the first one's model. A table name
-is a plain identifier of at most 63 characters, because it reaches the
-store's hand-built subquery unquoted and PostgreSQL truncates identifiers
-past 63 bytes. And a name that another namespace already answers to raises
-`InvalidTableName` rather than being accepted.
+is a plain identifier of at most 63 characters, so it names a table the
+namespace owns outright rather than a schema-qualified or case-sensitive
+reference, and PostgreSQL cannot truncate two of them into one. A name
+another namespace already answers to raises `InvalidTableName`. The one
+query the gem writes by hand quotes the table name through the adapter, so a
+reserved word is a table like any other.
 
 ## Configuration is boot-time only
 
@@ -102,10 +104,9 @@ running concurrently with a reconfiguration may see either side of it.
 
 Locking those paths would buy nothing an app should want. Configuration is
 an initializer, reviewed and deployed; a process that swaps its store under
-live traffic has a problem no lock in this gem fixes. Saying so is the
-decision: the contract is explicit, and the races are out of scope on
-purpose rather than by omission. What *is* defended is the boundary between
-namespaces, which no configuration order can blur — see above.
+live traffic has a problem no lock in this gem fixes. The boundary between
+namespaces is defended instead, and no configuration order can blur it —
+see above.
 
 ## The log is the state (and also the clock)
 

@@ -361,14 +361,11 @@ that rule is what keeps both one-to-one with the namespace.
 ### `config.table_name`
 
 The table a namespace owns. Defaults to `<name>_dials`; the root's is
-`dials` (see `config.table_name_prefix`).
+`dials` (see `config.table_name_prefix`). `nil` restores the derived name.
 
 A table name is lowercase letters, digits and underscores, at most 63
-characters — it reaches raw SQL unquoted, and PostgreSQL truncates
-identifiers past 63 bytes. Two namespaces may never resolve to one table:
-sharing one would interleave their keys, history and stale-write sequences
-with nothing to tell them apart. Either raises `Dials::InvalidTableName` at
-boot.
+characters, and no two namespaces may resolve to one table. Either raises
+`Dials::InvalidTableName` at boot.
 
 ### `Dials.namespaces → [Namespace]`
 
@@ -465,5 +462,5 @@ All inherit `Dials::Error`:
 | `WriteConflict` | concurrent unconditional writes to one override outran the store's retries (effectively never) |
 | `DuplicateNamespace` | a namespace declared twice |
 | `UnknownNamespace` | a namespace fetched that was never declared |
-| `InvalidNamespace` | a namespace name that is not a lowercase, underscore-separated identifier |
+| `InvalidNamespace` | a namespace name whose segments are not lowercase letters and digits, each starting with a letter |
 | `InvalidTableName` | a table name that is not a plain identifier, is over 63 characters, or is already another namespace's |

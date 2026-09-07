@@ -66,11 +66,9 @@ letter, joined by single underscores (`bank_transfer`, `tier2`, not
 what keeps both one-to-one with the namespace. Anything else raises
 `Dials::InvalidNamespace`.
 
-`config.table_name` renames the table. It has the same shape — lowercase
-letters, digits and underscores, at most 63 characters, because it reaches
-raw SQL unquoted and PostgreSQL truncates identifiers past 63 bytes — and no
-two namespaces may resolve to one table. Either raises
-`Dials::InvalidTableName` at boot.
+`config.table_name` renames the table. It is lowercase letters, digits and
+underscores, at most 63 characters, and no two namespaces may resolve to one
+table. Either raises `Dials::InvalidTableName` at boot.
 
 ## What a namespace owns
 
