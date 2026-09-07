@@ -51,21 +51,20 @@ clearing every override returns you to exactly what the code says. Reads
 come from a per-process cache with a throttled staleness probe, so a dial
 read costs a hash lookup, not a query.
 
-A subsystem that owns its operator settings end to end declares a
-**namespace** — a full dials instance with its own registry, table, cache
-and change log:
+A subsystem that owns its operator settings declares a **namespace**: a
+dials instance with its own registry, table, cache and change log.
 
 ```ruby
-BankTransfer = Dials.namespace(:bank_transfer, label: "Bank Transfer") do |config|
-  config.store = :active_record   # table: "bank_transfer_dials"
+Shipping = Dials.namespace(:shipping, label: "Shipping") do |config|
+  config.store = :active_record   # table: "shipping_dials"
 end
 
-BankTransfer.define { dial :min_transfer_usd, default: 5, type: :integer, minimum: 1 }
-BankTransfer.min_transfer_usd     # => 5
+Shipping.define { dial :max_parcel_kg, default: 20, type: :integer, minimum: 1 }
+Shipping.max_parcel_kg            # => 20
 ```
 
-`Dials` itself is the default namespace, so an app that never mentions
-namespaces has exactly one.
+`Dials` is the default namespace, so an app that never mentions namespaces
+has exactly one.
 
 ## Installation
 

@@ -11,7 +11,7 @@ module DialsTestSupport
   def setup
     Dials.reset_namespaces!
     Dials.registry.reset!
-    Dials.default.instance_variable_set(:@config, Dials::Config.new(Dials.default))
+    Dials.default.reset_config!
     Dials.reset_cache!
     Thread.current[Dials::TXN_WRITE_KEY] = nil
     super

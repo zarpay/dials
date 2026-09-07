@@ -50,7 +50,7 @@ module Dials
 
     # The default namespace's table; renamed by Config#table_name_prefix.
     class Entry < Record
-      self.table_name = Dials::Config::DEFAULT_TABLE_NAME
+      self.table_name = Dials::Storage::DEFAULT_TABLE_NAME
     end
 
     # The model for a non-default namespace, named after it so a validation

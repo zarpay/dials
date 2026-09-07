@@ -25,9 +25,9 @@ Properties worth knowing:
   test override can't mask a call-site bug.
 - `false` pins fine — kill-switch specs work.
 
-A namespace pins its own dials through itself —
-`BankTransfer.with_overrides(min_transfer_usd: 3) { ... }` — and pinning one
-namespace never changes how another resolves.
+A namespace pins its own dials through itself:
+`Shipping.with_overrides(max_parcel_kg: 5) { ... }`. A pin on one namespace
+does not change what another returns.
 
 Prefer `with_overrides` for consumer specs. Reach for real `adjust_*` writes
 only when the *dial layer itself* is what you're testing (resolution,
@@ -48,7 +48,7 @@ end
 
 (Minitest: `Dials.reload!` in your base-class `setup`.)
 
-An app with [namespaces](/guides/namespaces) resets them all with
+An app with [namespaces](/guides/namespaces) resets all of them with
 `Dials.reload_all!`. A suite that *declares* namespaces per example also
 wants `Dials.reset_namespaces!`, which discards every namespace but the
 root.

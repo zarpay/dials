@@ -8,9 +8,9 @@ class ActiveRecordStoreTest < Minitest::Test
 
   def setup
     super
-    # :zar_dials is the same shape under a prefixed name, for the
+    # :ops_dials is the same shape under a prefixed name, for the
     # config.table_name_prefix tests.
-    DialsTestSupport.sqlite_schema!(:dials, :zar_dials)
+    DialsTestSupport.sqlite_schema!(:dials, :ops_dials)
     Dials::ActiveRecord::Entry.delete_all
     Dials.configure { |c| c.store = :active_record }
     define_standard_dials
@@ -291,12 +291,12 @@ class ActiveRecordStoreTest < Minitest::Test
   # -- config.table_name_prefix ------------------------------------------------
 
   def test_table_name_prefix_renames_the_table
-    Dials.configure { |c| c.table_name_prefix = "zar_" }
+    Dials.configure { |c| c.table_name_prefix = "ops_" }
     entries.delete_all
 
     Dials.set(:merchant_fee_bps, 150, actor: ACTOR)
 
-    assert_equal "zar_dials", entries.table_name
+    assert_equal "ops_dials", entries.table_name
     assert_equal 150, Dials.get(:merchant_fee_bps, market: "KE")
     assert_equal 1, entries.count
     assert_equal 0, entries.connection.select_value("SELECT COUNT(*) FROM dials").to_i,
@@ -307,20 +307,20 @@ class ActiveRecordStoreTest < Minitest::Test
 
   def test_table_name_prefix_applies_when_set_before_the_store
     Dials.configure do |c|
-      c.table_name_prefix = "zar_"
+      c.table_name_prefix = "ops_"
       c.store = :active_record
     end
     entries.delete_all
 
     Dials.set(:merchant_fee_bps, 150, actor: ACTOR)
-    assert_equal "zar_dials", entries.table_name
+    assert_equal "ops_dials", entries.table_name
     assert_equal 1, entries.count
   ensure
     Dials.config.table_name_prefix = nil
   end
 
   def test_nil_table_name_prefix_restores_the_default
-    Dials.config.table_name_prefix = "zar_"
+    Dials.config.table_name_prefix = "ops_"
     Dials.config.table_name_prefix = nil
     assert_equal "dials", entries.table_name
   end

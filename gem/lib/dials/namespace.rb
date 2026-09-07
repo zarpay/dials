@@ -11,12 +11,12 @@ module Dials
   # delegates to, so an app that never mentions namespaces uses exactly one.
   # Every other namespace is created with Dials.namespace:
   #
-  #   Transfers = Dials.namespace(:transfers, label: "Transfers") do |config|
-  #     config.store = :active_record          # table: "transfers_dials"
+  #   Shipping = Dials.namespace(:shipping, label: "Shipping") do |config|
+  #     config.store = :active_record          # table: "shipping_dials"
   #   end
   #
-  #   Transfers.define { dial :min_amount_usd, default: 5, type: :integer }
-  #   Transfers.min_amount_usd                 # => 5
+  #   Shipping.define { dial :max_parcel_kg, default: 20, type: :integer }
+  #   Shipping.max_parcel_kg                   # => 20
   #
   # A dial resolves inside its namespace only: there is no cross-namespace
   # fallback, and the same key may be declared in two namespaces.
@@ -25,8 +25,8 @@ module Dials
 
     # A name becomes a table name and (for an ActiveRecord store) a model
     # class name, so it is a lowercase identifier with single underscores
-    # between segments: that keeps "bank_transfer" -> BankTransferEntry
-    # one-to-one, so two namespaces can never derive the same model.
+    # between segments: that keeps "flat_rate" -> FlatRateEntry one-to-one,
+    # so two namespaces can never derive the same model.
     NAME_FORMAT = /\A[a-z][a-z0-9]*(_[a-z0-9]+)*\z/
 
     attr_reader :name, :registry, :config, :txn_write_key
@@ -47,12 +47,12 @@ module Dials
       @cache_lock = Mutex.new
       @cache = nil
       # Per namespace, so a write in one namespace never changes how another
-      # reads: markers are keyed by name, not shared.
+      # reads: the marker is keyed by name, not shared.
       @txn_write_key = :"dials_wrote_in_open_transaction_#{@name}"
-      @testing_key = :"dials_testing_overrides_#{@name}"
 
       @registry = Registry.new(self)
-      @config = Config.new(self, parent: parent&.config)
+      @storage = Storage.new(self, parent: parent&.storage)
+      @config = Config.new(self, @storage, parent: parent&.config)
       @config.label = label if label
       extend @generated_module
 
@@ -129,6 +129,15 @@ module Dials
       cache.bust!
     end
 
+    # Test hook: forget every option this namespace was configured with,
+    # and the store built from them, so an example starts from the shipped
+    # defaults.
+    def reset_config!
+      @storage = Storage.new(self, parent: @parent&.storage)
+      @config = Config.new(self, @storage, parent: @parent&.config)
+      reset_cache!
+    end
+
     # Test hook for Dials.reset_namespaces!: a discarded namespace stops
     # inheriting config changes.
     def forget_children!
@@ -169,7 +178,7 @@ module Dials
 
       # After scope validation, so a test override can never mask a read that
       # would raise in production.
-      pinned = pinned_override(definition.key)
+      pinned = Testing.override_for(self, definition.key)
       return pinned.first if pinned
 
       Resolver.resolve(definition, normalized, current_snapshot)
@@ -187,7 +196,7 @@ module Dials
     def global(key)
       definition = registry.fetch(key)
 
-      pinned = pinned_override(definition.key)
+      pinned = Testing.override_for(self, definition.key)
       return pinned.first if pinned
 
       # The empty scope matches no stored scoped override, so Resolver
@@ -305,26 +314,17 @@ module Dials
 
     # -- test overrides ------------------------------------------------------
 
-    # Pin dial values for the duration of a block without touching the
-    # store, the cache, or the change log — see Testing. Pinning is per
-    # namespace: pinning one namespace's :timeout_seconds leaves another
-    # namespace's dial of the same name resolving normally.
-    def with_overrides(overrides)
-      validated = overrides.to_h do |key, value|
-        definition = registry.fetch(key)
-        [definition.key, definition.validate_value!(value)]
-      end
-
-      previous = Thread.current[@testing_key]
-      Thread.current[@testing_key] = (previous || {}).merge(validated)
-      yield
-    ensure
-      Thread.current[@testing_key] = previous
+    # Pin this namespace's dial values for the duration of a block, without
+    # touching the store, the cache, or the change log — see Testing.
+    def with_overrides(overrides, &)
+      Testing.with_overrides(overrides, self, &)
     end
 
     def adopt(child)
       @children << child
     end
+
+    protected attr_reader :storage
 
     # Internal: this namespace reads its parent's cache_ttl, so a change
     # there reaches a cache that was already built.
@@ -335,9 +335,9 @@ module Dials
     end
 
     def inherit_store
-      return if config.explicitly_set?(:store_kind)
+      return if @storage.declared?
 
-      config.discard_store!
+      @storage.discard_store!
       reset_cache!
     end
 
@@ -345,13 +345,6 @@ module Dials
 
     def collision_owners
       root? ? { "Dials" => Dials, "Dials.default" => self } : { "Dials.namespace(:#{@name})" => self }
-    end
-
-    def pinned_override(key)
-      overrides = Thread.current[@testing_key]
-      return nil unless overrides
-
-      overrides.key?(key) ? [overrides[key]] : nil
     end
 
     # { canonical scope string => value } from the snapshot, re-keyed by

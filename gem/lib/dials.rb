@@ -19,6 +19,7 @@ require_relative "dials/cache"
 require_relative "dials/change_record"
 require_relative "dials/actor"
 require_relative "dials/stores/memory"
+require_relative "dials/storage"
 require_relative "dials/config"
 require_relative "dials/namespace"
 require_relative "dials/testing"
@@ -48,12 +49,13 @@ require_relative "dials/testing"
 # app's own dials, in the app's own table. A subsystem that owns its
 # settings end to end declares a namespace of its own instead:
 #
-#   Transfers = Dials.namespace(:transfers) { |config| config.store = :active_record }
+#   Shipping = Dials.namespace(:shipping) { |config| config.store = :active_record }
 #
 # and gets the same API on that object, against a table of its own.
 module Dials
-  # Guards @namespaces: engine initializers declare at boot, in an order the
-  # app does not control.
+  # Guards the check-then-set in `namespace`, so two engine initializers
+  # declaring at once cannot both win. Declarations only; a fetch reads the
+  # table without it.
   NAMESPACE_LOCK = Mutex.new
 
   # The stale-write token of an override that is not stored. Pass it as
@@ -75,11 +77,11 @@ module Dials
 
     # Declare a namespace (with a block or a label), or fetch one by name:
     #
-    #   Transfers = Dials.namespace(:transfers, label: "Transfers") do |config|
-    #     config.store = :active_record        # table: "transfers_dials"
+    #   Shipping = Dials.namespace(:shipping, label: "Shipping") do |config|
+    #     config.store = :active_record        # table: "shipping_dials"
     #   end
     #
-    #   Dials.namespace(:transfers)            # the same object, later
+    #   Dials.namespace(:shipping)             # the same object, later
     #
     # Options the block leaves alone inherit the root's config. Declaring a
     # name twice raises DuplicateNamespace; fetching one that was never
@@ -200,11 +202,9 @@ module Dials
     private
 
     def fetch_namespace(key, name)
-      NAMESPACE_LOCK.synchronize do
-        @namespaces.fetch(key) do
-          raise UnknownNamespace,
-                "no namespace named #{name.inspect} (declared: #{@namespaces.keys.join(', ')})"
-        end
+      @namespaces.fetch(key) do
+        raise UnknownNamespace,
+              "no namespace named #{name.inspect} (declared: #{@namespaces.keys.join(', ')})"
       end
     end
 

@@ -1,113 +1,117 @@
 # Namespaces
 
-A subsystem that wants an operator knob has two bad options. It declares a
+A subsystem that needs an operator knob has two bad options. It can declare a
 dial, and its override rows land in the host app's `dials` table, which the
-host owns. Or it builds its own settings table and gives up everything a
-dial provides: types, bounds, attribution, a change log, stale-write
-protection.
+host owns. Or it can build its own settings table, and give up types, bounds,
+attribution, history, and stale-write protection.
 
-A **namespace** is the third option. It is a full dials instance — its own
-registry, config, store, table, cache, change log, generated readers and
-test overrides. The subsystem owns its settings end to end.
+A **namespace** is the third option: a dials instance of its own, with its own
+registry, config, store, table, cache, change log, generated readers, and test
+overrides.
 
 ```ruby
 # in the engine's initializer
 require "dials/active_record"
 
-BankTransfer = Dials.namespace(:bank_transfer, label: "Bank Transfer") do |config|
-  config.store = :active_record        # table: "bank_transfer_dials"
+Shipping = Dials.namespace(:shipping, label: "Shipping") do |config|
+  config.store = :active_record        # table: "shipping_dials"
 end
 
-BankTransfer.define do
-  dial :min_transfer_usd, default: 5, type: :integer, minimum: 1, maximum: 10_000
+Shipping.define do
+  dial :max_parcel_kg, default: 20, type: :integer, minimum: 1, maximum: 50,
+       unit: "kg", description: "Heaviest parcel a courier will accept."
 end
 
-BankTransfer.min_transfer_usd                              # => 5
-BankTransfer.adjust_min_transfer_usd(6, actor: current_admin)
-BankTransfer.changes                                       # this namespace's log only
+Shipping.max_parcel_kg                              # => 20
+Shipping.adjust_max_parcel_kg(30, actor: current_admin)
+Shipping.changes                                    # this namespace's log only
 ```
 
-Everything you do with `Dials` for the app's own dials, you do with the
-namespace object: `define`, `configure`, `get`/`set`/`clear`, `overview`,
-`changes`, `scoped_overrides`, `reload!`, `with_overrides`, and the three
-generated methods per dial. Declaring and listing namespaces stays on the
-module (`Dials.namespace`, `Dials.namespaces`, `Dials.default`).
+What you do with `Dials` for the app's own dials, you do with the namespace
+object: `define`, `configure`, `get`/`set`/`clear`, `overview`, `changes`,
+`scoped_overrides`, `reload!`, `with_overrides`, and the three generated
+methods per dial. Declaring and listing namespaces stays on the module
+(`Dials.namespace`, `Dials.namespaces`, `Dials.default`).
 
 ## Install one
 
-```bash
-bin/rails generate dials:install --namespace=bank_transfer
+There is no generator flag for this. A namespace needs one table and a few
+lines in an initializer, so write both.
+
+The table is the same shape as the root's — copy
+`create_dials_table` from `rails g dials:install` (or from
+[Install](/guides/install)) and name it `shipping_dials`:
+
+```ruby
+create_table :shipping_dials do |t|
+  # ... exactly the columns and indexes of the dials table
+end
 ```
 
-That writes a migration for `bank_transfer_dials` and
-`config/initializers/dials_bank_transfer.rb` declaring the namespace.
+Then declare the namespace in `config/initializers/dials_shipping.rb`, as in
+the example above. Load order does not matter: an engine can declare its
+namespace before the app configures `Dials`, and options it does not set
+still follow the root.
 
-A name is lowercase letters, digits and single underscores — it becomes a
+A name is lowercase letters, digits, and single underscores. It becomes a
 table name and a model class name, and that rule keeps both unique per
 namespace. Anything else raises `Dials::InvalidNamespace`.
 
-## What is separate, and what is shared
+## What a namespace owns
 
-Separate, by construction:
-
-- **The registry.** A key is unique inside its namespace. Two namespaces may
+- **Its registry.** A key is unique inside its namespace. Two namespaces can
   both declare `:timeout_seconds`, with different types and different
   defaults.
-- **The table.** A namespace owns a table — `<name>_dials` unless
-  `config.table_name` says otherwise. Rows never mix, and no namespace
-  column has to be trusted.
-- **The change log**, because the rows are the log.
-- **The cache.** A write in one namespace busts one cache. Nothing else
+- **Its table** — `<name>_dials`, unless `config.table_name` says otherwise.
+  Two namespaces never share a table, so no reader has to filter on a
+  namespace column.
+- **Its change log**, because the rows are the log.
+- **Its cache.** A write in one namespace busts one cache. No other namespace
   re-reads.
-- **Thread-local state.** A write inside an open transaction, and a
-  `with_overrides` pin, apply to the namespace that made them. One
-  namespace's test pin never changes how another resolves.
-- **Resolution.** A dial resolves inside its namespace only:
-  scoped override → global override → code default, and never a fallback
-  into another namespace.
+- **Its thread-local state.** A write inside an open transaction, and a
+  `with_overrides` pin, apply to the namespace that made them. A test pin on
+  one namespace does not change what another returns.
+- **Its resolution.** A dial resolves inside its namespace: scoped override →
+  global override → code default. There is no fallback into another namespace.
 
-Shared, because an app configures it once:
+## What it takes from the app
 
-- **Unset config options.** `cache_ttl`, `actor_label` and `default_actor`
-  read through to the root's config when the namespace declares none of its
-  own. An engine that configures nothing but its store still honours the
-  app's probe interval and attribution.
-- **`config.store` inherits by kind, never by object.** A namespace that
-  declares no store gets the same *kind* the root uses — with a table of its
-  own, because a namespace owns its rows. A store *object* is not
-  inheritable (sharing one would put two namespaces in one key space): under
-  a custom store, a namespace names its own.
+- **Options it does not set.** `cache_ttl`, `actor_label` and `default_actor`
+  read through to the root's config. An engine that sets nothing but its store
+  still uses the app's probe interval and its attribution.
+- **The store kind, not the store.** A namespace with no store of its own uses
+  the kind the root uses, against its own table. A store *object* is never
+  inherited: two namespaces on one store would share its rows. Under a custom
+  store, a namespace names its own.
 
 ## The root namespace
 
-`Dials` itself is the default namespace, named `:default`. Every method on
-the module delegates to it, so an app that never mentions namespaces has
-exactly one and nothing changes. `Dials.default` names it explicitly.
+`Dials` is the default namespace, named `:default`. Every method on the module
+reads and writes through it, so an app that never mentions namespaces has
+exactly one, and nothing changes for it. `Dials.default` names it explicitly.
 
-`config.table_name_prefix` still names the root's table (`"zar_"` →
-`zar_dials`). Every other namespace names its table with
-`config.table_name`; setting the prefix on one raises `Dials::Error`, which
-says so.
+`config.table_name_prefix` names the root's table (`"ops_"` → `ops_dials`).
+Every other namespace names its table with `config.table_name`; the prefix
+raises `Dials::Error` there.
 
-## Discovering namespaces
+## Finding namespaces
 
 ```ruby
-Dials.namespaces          # every namespace, root first, then registration order
-Dials.namespace(:bank_transfer)  # fetch one; raises UnknownNamespace
+Dials.namespaces             # every namespace, root first, then declaration order
+Dials.namespace(:shipping)   # fetch one; raises UnknownNamespace
 ```
 
-An admin surface groups dials by iterating `Dials.namespaces` and reading
-each one's `label` and `overview` — without naming any subsystem:
+An admin page groups dials by walking `Dials.namespaces` and reading each
+one's `label` and `overview`, without naming a subsystem:
 
 ```ruby
 Dials.namespaces.map { |ns| [ns.label, ns.overview.dials] }
 ```
 
-## When a namespace is the wrong answer
+## When not to declare one
 
-A namespace is for a subsystem that **owns** the setting — an engine, a
-bounded context, something that could plausibly become its own service with
-the same declarations. It is not a grouping mechanism for one app's dials:
-that is what a dial's `description`, and your own admin page's sections,
-are for. Splitting one app's dials across tables buys nothing and costs a
-migration.
+A namespace is for a subsystem that owns the setting: an engine, a bounded
+context, something that could become its own service with the same
+declarations. It is not a way to group one app's dials — a dial's
+`description` and your admin page's own sections do that. Splitting one app's
+dials across tables costs a migration and buys nothing.

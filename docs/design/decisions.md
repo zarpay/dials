@@ -64,21 +64,19 @@ differ only by case), and the composite index carries explicit column limits
 
 A subsystem that needs an operator knob should not have to put its rows in
 the host app's table, and should not have to give up types, bounds,
-attribution and history to avoid that. A namespace is a full dials instance:
-its own registry, config, store, table, cache, change log, generated readers
-and test overrides.
+attribution and history to avoid that. So a namespace is a dials instance of
+its own: its own registry, config, store, table, cache and change log.
 
-The alternative — one table with a `namespace` column — was rejected. Every
-reader would then have to filter correctly to stay isolated, a subsystem
-could not be extracted to its own database without a data migration, and
-"who owns this row" would be a convention rather than a schema fact. A
-namespace owning a table makes the boundary the same object at every level:
-registry, cache, table.
+Why not one table with a `namespace` column? Because then every reader has to
+filter correctly to stay isolated, a subsystem cannot move to its own
+database without a data migration, and "who owns this row" is a convention
+instead of a schema fact. One table per namespace makes the boundary the same
+in every layer: registry, cache, table.
 
-What a namespace does *not* get is cross-namespace resolution. A dial
-resolves inside its namespace only — scoped override → global override →
-code default — because a fallback across owners would make "which
-subsystem's default is this?" unanswerable from the declaration.
+A namespace does not get cross-namespace resolution. A dial resolves inside
+its namespace — scoped override → global override → code default — because a
+fallback across owners would make "whose default is this?" unanswerable from
+the declaration.
 
 ## The log is the state (and also the clock)
 

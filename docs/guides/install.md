@@ -27,12 +27,8 @@ used verbatim — include the trailing underscore, as with Rails'
 `table_name_prefix`:
 
 ```bash
-bin/rails generate dials:install --table-name-prefix=zar_   # creates zar_dials
+bin/rails generate dials:install --table-name-prefix=ops_   # creates ops_dials
 ```
-
-Installing dials for a subsystem that should own its settings — an engine, a
-bounded context — passes `--namespace` instead, and gets a registry and a
-table of its own: see [Namespaces](/guides/namespaces).
 
 ## 2. Configure and declare
 

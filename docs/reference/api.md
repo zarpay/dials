@@ -275,7 +275,7 @@ Dials.configure do |config|
   config.cache_ttl = 5.0               # seconds; 0 = probe every read; nil = never
   config.actor_label = ->(actor) { }   # change-log label builder
   config.default_actor = nil           # fallback attribution; see below
-  config.table_name_prefix = nil       # "zar_" names the root's table zar_dials; see below
+  config.table_name_prefix = nil       # "ops_" names the root's table ops_dials; see below
 end
 ```
 
@@ -286,14 +286,14 @@ existing table. Used verbatim — include the trailing underscore, as with Rails
 `table_name_prefix`:
 
 ```ruby
-config.table_name_prefix = "zar_"   # the table is zar_dials
+config.table_name_prefix = "ops_"   # the table is ops_dials
 ```
 
 The migration must create the matching table; pass the same prefix to the
 install generator so both stay in step:
 
 ```bash
-bin/rails generate dials:install --table-name-prefix=zar_
+bin/rails generate dials:install --table-name-prefix=ops_
 ```
 
 `nil` (the default) keeps `dials`. Every other namespace names its table
@@ -324,40 +324,42 @@ Needed after writes that bypass the gem, and in test suites (see
 
 ## Namespaces
 
-A namespace is a full dials instance of its own. `Dials` itself is the
-default one (name `:default`); every method on the module delegates to it.
-See [Namespaces](/guides/namespaces) for what is separate, what is
-inherited, and when to declare one.
+A namespace is a dials instance of its own: its own registry, config, store,
+table, cache and change log. `Dials` is the default one (name `:default`),
+and every method on the module reads and writes through it. See
+[Namespaces](/guides/namespaces) for what a namespace owns, what it inherits,
+and when to declare one.
 
 ### `Dials.namespace(name, label: nil, &block) → Namespace`
 
-With a block or a `label:`, declares a namespace; with neither, fetches the
-one already declared under that name.
+Declares a namespace when you pass a block or a `label:`. Fetches the one
+already declared under that name when you pass neither.
 
 ```ruby
-BankTransfer = Dials.namespace(:bank_transfer, label: "Bank Transfer") do |config|
-  config.store = :active_record      # table: "bank_transfer_dials"
-  config.table_name = "other_name"   # optional; overrides the derived name
-  config.label = "Bank Transfer"     # same as the label: argument
+Shipping = Dials.namespace(:shipping, label: "Shipping") do |config|
+  config.store = :active_record      # table: "shipping_dials"
+  config.table_name = "other_name"   # optional; renames the table
+  config.label = "Shipping"          # same as the label: argument
 end
 
-Dials.namespace(:bank_transfer)      # the same object, later
+Dials.namespace(:shipping)           # the same object, later
 ```
 
-Options the block leaves alone (`cache_ttl`, `actor_label`,
-`default_actor`) read through to the root's config; `store` inherits by
-*kind*, so an inheriting namespace still owns its own table. A store
-*object* is not inheritable — a namespace under one must name its own store,
-or reading a dial raises `Dials::Error`. Raises
-`Dials::DuplicateNamespace` for a name declared twice,
+Options the block leaves alone (`cache_ttl`, `actor_label`, `default_actor`)
+read through to the root's config. `store` inherits by *kind*, so an
+inheriting namespace still owns its own table; a store *object* is never
+inherited, and a namespace under one must name its own store or reading a
+dial raises `Dials::Error`.
+
+Raises `Dials::DuplicateNamespace` for a name declared twice,
 `Dials::UnknownNamespace` for a fetch of one never declared, and
 `Dials::InvalidNamespace` for a name that is not lowercase letters, digits
 and single underscores (the name becomes a table name).
 
 ### `Dials.namespaces → [Namespace]`
 
-Every namespace, root first, then registration order — what an admin
-surface iterates to group dials by subsystem:
+Every namespace, root first, then declaration order. An admin page walks it
+to group dials by subsystem:
 
 ```ruby
 Dials.namespaces.map { |ns| [ns.name, ns.label, ns.overview.dials] }
@@ -372,23 +374,23 @@ The root namespace, named explicitly.
 Everything documented above, on the namespace object:
 
 ```ruby
-ns.name                 # :bank_transfer
-ns.label                # "Bank Transfer" (config.label; the root's is "Dials")
+ns.name                 # :shipping
+ns.label                # "Shipping" (config.label; the root's is "Dials")
 ns.define { dial ... }
 ns.configure { |config| ... }
 ns.registry / ns.config / ns.store / ns.cache
-ns.min_transfer_usd                                        # generated reader
-ns.adjust_min_transfer_usd(6, actor:, expected_version:)   # generated writer
-ns.clear_min_transfer_usd(actor:, expected_version:)       # generated clear
+ns.max_parcel_kg                                       # generated reader
+ns.adjust_max_parcel_kg(30, actor:, expected_version:) # generated writer
+ns.clear_max_parcel_kg(actor:, expected_version:)      # generated clear
 ns.get / ns.set / ns.clear / ns.scoped_overrides
 ns.overview             # one snapshot of this namespace's dials
-ns.changes(key: nil, limit: 50)                            # its own log only
-ns.with_overrides(min_transfer_usd: 3) { ... }             # thread-local pin
+ns.changes(key: nil, limit: 50)                        # its own log only
+ns.with_overrides(max_parcel_kg: 5) { ... }            # thread-local pin
 ns.reload! / ns.reset_cache!
 ```
 
-A dial resolves inside its namespace only — there is no cross-namespace
-fallback, and the same key may be declared in two namespaces.
+A dial resolves inside its namespace: there is no cross-namespace fallback,
+and two namespaces may declare the same key.
 
 ## Testing
 
@@ -396,20 +398,20 @@ fallback, and the same key may be declared in two namespaces.
 
 Thread-local, validated, nestable value pinning for the block's duration.
 Applies to every scope of each pinned dial; never touches store, cache, or
-log. Pins the default namespace; another namespace pins its own dials
-through itself (`BankTransfer.with_overrides(...)`), and one namespace's pin
-never changes how another resolves.
+log. It pins the default namespace. Another namespace pins its own dials
+through itself (`Shipping.with_overrides(...)`), and a pin on one namespace
+does not change what another returns.
 
 ### `Dials.reload_all!`
 
-`reload!` for every namespace — one call for a suite that wraps examples in
+`reload!` for every namespace: one call for a suite that wraps examples in
 transactions.
 
 ### `Dials.reset_namespaces!`
 
 Test hook: discards every namespace but the root, and with them their
-registries and generated methods. For a suite that declares namespaces and
-wants a blank slate per example.
+registries and generated methods. Use it in a suite that declares namespaces
+and wants a blank slate per example.
 
 ## Stores
 
@@ -425,14 +427,13 @@ the write itself, never a second read). Shipped: `Stores::Memory` (default) and
 
 ```bash
 bin/rails generate dials:install
-bin/rails generate dials:install --table-name-prefix=zar_     # table: zar_dials
-bin/rails generate dials:install --namespace=bank_transfer    # table: bank_transfer_dials
+bin/rails generate dials:install --table-name-prefix=ops_   # table: ops_dials
 ```
 
-Creates the migration for one table and an initializer —
-`config/initializers/dials.rb`, or `dials_<name>.rb` declaring the namespace
-that owns the table. The two options are mutually exclusive: the prefix
-names the default namespace's table, a namespace's table is `<name>_dials`.
+Creates the migration for the gem-owned table and
+`config/initializers/dials.rb`. A [namespace](/guides/namespaces) is not
+generated — it needs one table like this one and a few lines in an
+initializer.
 
 ## Errors
 

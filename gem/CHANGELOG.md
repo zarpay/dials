@@ -2,29 +2,29 @@
 
 ## [Unreleased]
 
-- **Namespaces.** A subsystem can own its dials end to end:
-  `Dials.namespace(:bank_transfer) { |config| config.store = :active_record }`
-  returns a full dials instance — its own registry, config, store, table
-  (`bank_transfer_dials`), cache, change log, generated readers and test
+- **Namespaces.** A subsystem can own its dials:
+  `Dials.namespace(:shipping) { |config| config.store = :active_record }`
+  returns a dials instance of its own — its own registry, config, store,
+  table (`shipping_dials`), cache, change log, generated readers and test
   overrides. A key is unique inside its namespace, so two namespaces may
-  declare the same one; a dial resolves inside its namespace only.
+  declare the same one, and a dial resolves inside its namespace only.
   `Dials.namespaces` lists every namespace (root first) for an admin surface
   that groups dials by subsystem, and `Dials.default` names the root.
   Unset options (`cache_ttl`, `actor_label`, `default_actor`) inherit the
   root's config; `store` inherits by kind, so an inheriting namespace still
   owns its table (a store *object* is not inheritable — sharing one would
   put two namespaces in one key space). `config.table_name` renames a namespace's table;
-  `config.table_name_prefix` still names the root's. The install generator
-  takes `--namespace <name>`.
+  `config.table_name_prefix` still names the root's.
 - **Newly reserved dial keys.** A dial's reader must not shadow a method on
-  its namespace, and the namespace object carries a few methods the `Dials`
-  module did not: `label`, `with_overrides`, `default_label`, `root?`,
+  its namespace, and the namespace object carries methods the `Dials` module
+  did not: `label`, `with_overrides`, `default_label`, `root?`, `storage`,
   `txn_write_key`, `generated_module`, `install_generated!`,
   `uninstall_generated!`, `apply_cache_ttl`, `apply_store`,
-  `inherit_cache_ttl`, `inherit_store`, `adopt`, `forget_children!` — plus
-  the new module methods `default`, `namespace`, `namespaces`,
-  `reload_all!` and `reset_namespaces!`. A dial declared under one of those
-  names now raises `InvalidDefinition` at boot instead of at no point.
+  `inherit_cache_ttl`, `inherit_store`, `adopt`, `forget_children!` and
+  `reset_config!` — plus the new module methods `default`, `namespace`,
+  `namespaces`, `reload_all!` and `reset_namespaces!`. A dial declared under
+  one of those names now raises `InvalidDefinition` at boot instead of at no
+  point.
 - A namespace name must be lowercase letters, digits and single underscores
   (`InvalidNamespace` otherwise): it becomes a table name and a model class
   name, and that rule keeps both unique per namespace.
@@ -38,9 +38,10 @@
   (each namespace keeps its own thread-local pins); `Dials::CACHE_LOCK` and
   `Stores::ActiveRecordStore::Entry` are gone (the store now takes
   `model:`); `Dials::ActiveRecord::Entry` subclasses a new abstract
-  `Dials::ActiveRecord::Record`, and its `DEFAULT_TABLE_NAME` moved to
-  `Dials::Config`; `Dials::Actor.normalize`, `Registry.new` and `Config.new`
-  now take the namespace (or its config) they act for.
+  `Dials::ActiveRecord::Record`, and its `DEFAULT_TABLE_NAME` moved to the
+  new `Dials::Storage`, which owns a namespace's store kind, table and
+  model; `Dials::Actor.normalize`, `Registry.new` and `Config.new` now take
+  the namespace (or its config and storage) they act for.
 
 ## [0.3.0] - 2026-09-07
 
