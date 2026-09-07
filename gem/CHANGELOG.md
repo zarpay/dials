@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.3.0] - 2026-09-07
 
 - **`Dials.global(key)`.** Read a dial's Global layer by key: the stored
   global override when present, else the code default — the tail every
