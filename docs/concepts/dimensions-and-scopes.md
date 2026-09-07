@@ -67,6 +67,22 @@ One sentence to remember: **a scoped override matches exactly, or you get the
 global.** No precedence table, no "which partial wins" question, nothing to
 misremember at 2am.
 
+## No scope to give: `Dials.global`
+
+One caller shape is legitimate and is not a lazy read: resolving a value for
+a subject whose dimension is *unknowable* — a recipient with no resolvable
+market, an anonymous visitor before any context exists. The honest answer
+there is the **Global layer**: the stored global override when present, else
+the code default — the same tail every un-overridden scope falls through to.
+
+```ruby
+Dials.global(:free_delivery_threshold)   # global override → code default
+```
+
+`Dials.global` names that question instead of leaving it inexpressible. It
+never sees scoped overrides, and it does not loosen the exact-scope rule: a
+caller that knows its scope must still pass it.
+
 ## Canonical scopes
 
 Stored scopes are canonicalized — keys sorted, values stringified — so

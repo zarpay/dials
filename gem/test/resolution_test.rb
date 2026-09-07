@@ -84,6 +84,49 @@ class ResolutionTest < Minitest::Test
     assert_raises(FrozenError) { value["base"] = 99 }
   end
 
+  # -- Dials.global: the Global layer by key ---------------------------------
+
+  def test_global_returns_code_default_when_nothing_stored
+    assert_equal 100, Dials.global(:merchant_fee_bps)
+    assert_equal true, Dials.global(:signups_enabled)
+  end
+
+  def test_global_returns_the_stored_global_override
+    Dials.set(:merchant_fee_bps, 150, actor: ACTOR)
+    assert_equal 150, Dials.global(:merchant_fee_bps)
+  end
+
+  def test_global_never_sees_scoped_overrides
+    Dials.set(:merchant_fee_bps, 150, actor: ACTOR)
+    Dials.set(:merchant_fee_bps, 90, scope: { market: "KE" }, actor: ACTOR)
+    assert_equal 150, Dials.global(:merchant_fee_bps)
+
+    Dials.clear(:merchant_fee_bps, actor: ACTOR)
+    assert_equal 100, Dials.global(:merchant_fee_bps), "a scoped override alone leaves the Global layer at the default"
+  end
+
+  def test_global_equals_get_for_an_undimensioned_dial
+    Dials.set(:signups_enabled, false, actor: ACTOR)
+    assert_equal Dials.get(:signups_enabled), Dials.global(:signups_enabled)
+  end
+
+  def test_global_false_override_resolves_as_false
+    Dials.set(:signups_enabled, false, actor: ACTOR)
+    assert_equal false, Dials.global(:signups_enabled)
+  end
+
+  def test_global_unknown_dial_raises
+    assert_raises(Dials::UnknownDial) { Dials.global(:merchant_fee) }
+  end
+
+  def test_global_json_values_are_deep_frozen
+    Dials.define { dial :fee_table, default: { "base" => 1 }, type: :json }
+    Dials.set(:fee_table, { "base" => 2 }, actor: ACTOR)
+    value = Dials.global(:fee_table)
+    assert value.frozen?
+    assert_raises(FrozenError) { value["base"] = 99 }
+  end
+
   # The resolver is intentionally more general than the v1 write rule: stored
   # partial scopes (subset of declared dimensions) already resolve with
   # most-specific-wins, ties broken by declared dimension order. Exercised

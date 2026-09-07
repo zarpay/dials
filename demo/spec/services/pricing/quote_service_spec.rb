@@ -32,6 +32,21 @@ RSpec.describe Pricing::QuoteService do
     expect(ios.free_delivery).to be(true)
   end
 
+  describe ".estimate (anonymous visitor, no resolvable market)" do
+    it "estimates from code defaults out of the box" do
+      quote = described_class.estimate(10_000)
+      expect(quote.fee_cents).to eq(250)
+      expect(quote.free_delivery).to be(true)
+    end
+
+    it "sees a global override but never a per-market one" do
+      Dials.adjust_checkout_fee_bps(500, actor: actor)                # global
+      Dials.adjust_checkout_fee_bps(100, actor: actor, market: "BD") # scoped
+
+      expect(described_class.estimate(10_000).fee_cents).to eq(500)
+    end
+  end
+
   it "is testable with pinned dials instead of store writes" do
     Dials::Testing.with_overrides(checkout_fee_bps: 1_000) do
       quote = described_class.new(market: "NG", platform: "android").quote(10_000)

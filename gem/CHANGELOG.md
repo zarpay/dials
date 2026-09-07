@@ -1,5 +1,16 @@
 # Changelog
 
+## [Unreleased]
+
+- **`Dials.global(key)`.** Read a dial's Global layer by key: the stored
+  global override when present, else the code default — the tail every
+  un-overridden scope falls through to. The front door for callers with no
+  scope to give (a subject whose dimension is unknowable), not a way around
+  exact-scope reads: `get` still raises `InvalidScope` for a scopeless read
+  of a dimensioned dial. Honors `Dials::Testing.with_overrides` pins; raises
+  `UnknownDial`. Note: `global` joins the reserved `Dials` method names, so
+  a dial named `:global` now fails at boot instead of being declarable.
+
 ## [0.2.0] - 2026-09-04
 
 - **`config.table_name_prefix`.** Prefix the gem-owned table when `dials`
