@@ -46,4 +46,15 @@ module Dials
   # essentially never at operator write rates. Safe to retry; carries no
   # staleness meaning (that is StaleWrite).
   class WriteConflict < Error; end
+
+  # Raised when a namespace is declared twice. A namespace owns a registry
+  # and a table; a silent second declaration would make "whose dials are
+  # these?" ambiguous.
+  class DuplicateNamespace < Error; end
+
+  # Raised when a namespace is fetched that was never declared.
+  class UnknownNamespace < Error; end
+
+  # Raised when a namespace name is not a plain identifier.
+  class InvalidNamespace < Error; end
 end

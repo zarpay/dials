@@ -1,0 +1,38 @@
+# frozen_string_literal: true
+
+require "dials/active_record"
+
+# The <%= namespace_name %> namespace: its own registry, its own table
+# (<%= table_name %>), its own change log. Nothing declared here touches the
+# app's dials, and nothing the app declares touches these.
+#
+# Options this block leaves alone (cache_ttl, actor_label, default_actor)
+# inherit whatever the app configured for Dials itself.
+<%= constant_name %> = Dials.namespace(:<%= namespace_name %>, label: "<%= label %>") do |config|
+  # Where values live. :active_record uses the table created by
+  # `rails g dials:install --namespace=<%= namespace_name %>`; :memory keeps
+  # everything in-process.
+  config.store = :active_record
+
+  # The table defaults to <%= table_name %>. Name it something else here
+  # (and in the migration) if that collides.
+  # config.table_name = "<%= table_name %>"
+end
+
+# Declare this namespace's dials. A dial with no `dimensions:` is global-only
+# by construction. Declaring `dimensions:` is the arming gate — add it in the
+# same change as the code that reads the varied value.
+#
+# Each declaration generates the dial's methods on the namespace, e.g. for
+# :min_transfer_usd:
+#   <%= constant_name %>.min_transfer_usd
+#   <%= constant_name %>.adjust_min_transfer_usd(6, actor: current_admin)
+#   <%= constant_name %>.clear_min_transfer_usd(actor: current_admin)
+<%= constant_name %>.define do
+  # dial :min_transfer_usd, default: 5,
+  #      type: :integer,
+  #      minimum: 1,
+  #      maximum: 10_000,
+  #      unit: "USD",
+  #      description: "Smallest transfer an operator may allow."
+end

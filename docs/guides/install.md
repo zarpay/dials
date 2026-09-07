@@ -30,6 +30,10 @@ used verbatim — include the trailing underscore, as with Rails'
 bin/rails generate dials:install --table-name-prefix=zar_   # creates zar_dials
 ```
 
+Installing dials for a subsystem that should own its settings — an engine, a
+bounded context — passes `--namespace` instead, and gets a registry and a
+table of its own: see [Namespaces](/guides/namespaces).
+
 ## 2. Configure and declare
 
 ```ruby

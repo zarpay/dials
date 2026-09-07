@@ -26,10 +26,11 @@ override returns resolution to the layer below. Full argument in
 
 ## One table of overrides
 
-Storage is one table, and (see the next section) it is append-only: every
-override is a stream of rows keyed by `(key, scope)`, where the global
-override is the stream at the **empty scope**, stored as its canonical
-encoding `"{}"`.
+Storage is one table per [namespace](/guides/namespaces) — one for the whole
+app, unless a subsystem declares its own — and (see the next section) it is
+append-only: every override is a stream of rows keyed by `(key, scope)`,
+where the global override is the stream at the **empty scope**, stored as
+its canonical encoding `"{}"`.
 
 The alternative — a parent `dials` row per key with scoped rows hanging off
 an FK — adds protection this gem cannot use, at the cost of ongoing
@@ -58,6 +59,26 @@ textual under the column collation (canonical encoding makes gem writes
 safe; MySQL's case-insensitive defaults mean dimension options shouldn't
 differ only by case), and the composite index carries explicit column limits
 (key 100, scope 255) to stay inside every supported database's index budget.
+
+## A namespace owns a table
+
+A subsystem that needs an operator knob should not have to put its rows in
+the host app's table, and should not have to give up types, bounds,
+attribution and history to avoid that. A namespace is a full dials instance:
+its own registry, config, store, table, cache, change log, generated readers
+and test overrides.
+
+The alternative — one table with a `namespace` column — was rejected. Every
+reader would then have to filter correctly to stay isolated, a subsystem
+could not be extracted to its own database without a data migration, and
+"who owns this row" would be a convention rather than a schema fact. A
+namespace owning a table makes the boundary the same object at every level:
+registry, cache, table.
+
+What a namespace does *not* get is cross-namespace resolution. A dial
+resolves inside its namespace only — scoped override → global override →
+code default — because a fallback across owners would make "which
+subsystem's default is this?" unanswerable from the declaration.
 
 ## The log is the state (and also the clock)
 

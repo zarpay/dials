@@ -2,12 +2,12 @@
 
 module Dials
   module Stores
-    # The production store: ONE ActiveRecord-backed, append-only table (see
-    # Dials::ActiveRecord::Entry). Every write INSERTs a row; the newest row
-    # per (key, scope) stream is the current override, and the same rows are
-    # the attributed history and the cache's version counter. The global
-    # override is the stream at Scope::GLOBAL (the canonical empty scope).
-    # Implements the same interface as Stores::Memory.
+    # The production store: ONE ActiveRecord-backed, append-only table per
+    # namespace (see Dials::ActiveRecord::Record). Every write INSERTs a row;
+    # the newest row per (key, scope) stream is the current override, and the
+    # same rows are the attributed history and the cache's version counter.
+    # The global override is the stream at Scope::GLOBAL (the canonical empty
+    # scope). Implements the same interface as Stores::Memory.
     #
     # Concurrency control is the stream sequence: each row claims its
     # stream's next `seq` under UNIQUE(key, scope, seq), so of two concurrent
@@ -18,8 +18,6 @@ module Dials
     # only grows, so a stale-write token (the live row's seq) can never be
     # revisited by a later delete-and-recreate.
     class ActiveRecordStore
-      Entry = Dials::ActiveRecord::Entry
-
       # Sentinel for "this row could not be decoded; skip it".
       SKIP = Object.new
 
@@ -38,6 +36,13 @@ module Dials
       # Attempts per write: the first, plus retries for lost seq claims.
       # Operator write rates make even the second attempt rare.
       WRITE_ATTEMPTS = 3
+
+      # The namespace's model; its table is the namespace's table.
+      def initialize(model: Dials::ActiveRecord::Entry)
+        @model = model
+      end
+
+      attr_reader :model
 
       def state
         # Version first: if a write lands between these reads, the snapshot
@@ -64,11 +69,11 @@ module Dials
           when "set"
             nil # fall through to the value path
           else
-            quarantine("dials(#{row.key}, #{row.scope})", "unknown action #{row.action.inspect}")
+            quarantine("#{@model.table_name}(#{row.key}, #{row.scope})", "unknown action #{row.action.inspect}")
             next
           end
 
-          value = decode_row(row.value, "dials(#{row.key}, #{row.scope})")
+          value = decode_row(row.value, "#{@model.table_name}(#{row.key}, #{row.scope})")
           next if value.equal?(SKIP)
 
           if row.scope == Scope::GLOBAL
@@ -93,7 +98,7 @@ module Dials
       # unrelated write. Count catches it (N → N+1). Both aggregates come
       # from ONE statement so they describe one committed state, never two.
       def version
-        count, max = Entry.pick(Arel.sql("COUNT(*)"), Arel.sql("COALESCE(MAX(id), 0)"))
+        count, max = @model.pick(Arel.sql("COUNT(*)"), Arel.sql("COALESCE(MAX(id), 0)"))
         [count, max]
       end
 
@@ -111,7 +116,7 @@ module Dials
       # write). The facade uses this to keep uncommitted dial state out of
       # the shared cache.
       def transaction_open?
-        pool = Entry.connection_pool
+        pool = @model.connection_pool
         return false unless pool.active_connection?
 
         connection = pool.respond_to?(:lease_connection) ? pool.lease_connection : pool.connection
@@ -166,7 +171,7 @@ module Dials
       end
 
       def changes(key: nil, limit: 50)
-        relation = Entry.order(id: :desc).limit(limit)
+        relation = @model.order(id: :desc).limit(limit)
         relation = relation.where(key: key.to_s) if key
         rows = relation.to_a
         previous = predecessors_of(rows)
@@ -176,7 +181,7 @@ module Dials
           # action or a noncanonical scope is a row written around the gem,
           # and the two views must agree on which rows are valid.
           unless %w[set clear].include?(row.action)
-            next quarantine("dials(id #{row.id})", "unknown action #{row.action.inspect}")
+            next quarantine("#{@model.table_name}(id #{row.id})", "unknown action #{row.action.inspect}")
           end
 
           parsed_scope =
@@ -203,7 +208,7 @@ module Dials
         rescue StandardError => e
           # Same quarantine rule as state: one corrupt row (written around
           # the gem) must not take down the whole history listing.
-          quarantine("dials(id #{row.id})", "row does not decode (#{e.class})")
+          quarantine("#{@model.table_name}(id #{row.id})", "row does not decode (#{e.class})")
           nil
         end
       end
@@ -212,7 +217,7 @@ module Dials
 
       # The newest row of one (key, scope) stream, live or not.
       def newest(key, canonical_scope)
-        Entry.where(key: key.to_s, scope: canonical_scope).order(seq: :desc).first
+        @model.where(key: key.to_s, scope: canonical_scope).order(seq: :desc).first
       end
 
       def live?(row)
@@ -223,18 +228,18 @@ module Dials
       # is portable across PostgreSQL, MySQL, and SQLite (no window
       # functions) and walks the (key, scope, seq) index.
       def newest_rows
-        Entry.where(<<~SQL.squish)
+        @model.where(<<~SQL.squish)
           NOT EXISTS (
-            SELECT 1 FROM #{Entry.table_name} newer
-            WHERE newer.key = #{Entry.table_name}.key
-              AND newer.scope = #{Entry.table_name}.scope
-              AND newer.seq > #{Entry.table_name}.seq
+            SELECT 1 FROM #{@model.table_name} newer
+            WHERE newer.key = #{@model.table_name}.key
+              AND newer.scope = #{@model.table_name}.scope
+              AND newer.seq > #{@model.table_name}.seq
           )
         SQL
       end
 
       def append(key, canonical_scope, seq, action, encoded_value, actor)
-        Entry.create!(
+        @model.create!(
           key: key.to_s,
           scope: canonical_scope,
           seq: seq,
@@ -255,7 +260,7 @@ module Dials
         return {} if wanted.empty?
 
         wanted.group_by { |k, s, _| [k, s] }
-              .map { |(k, s), triples| Entry.where(key: k, scope: s, seq: triples.map(&:last)) }
+              .map { |(k, s), triples| @model.where(key: k, scope: s, seq: triples.map(&:last)) }
               .reduce(:or)
               .index_by { |r| [r.key, r.scope, r.seq] }
       end
@@ -291,7 +296,7 @@ module Dials
       def write(expected_version, &)
         attempts = 0
         begin
-          Entry.transaction(&)
+          @model.transaction(&)
         rescue ::ActiveRecord::RecordNotUnique
           if expected_version
             raise StaleWrite,
@@ -344,15 +349,15 @@ module Dials
       def valid_scope_string?(key, scope)
         parsed = JSON.parse(scope)
         unless parsed.is_a?(Hash) && !parsed.empty?
-          quarantine("dials(#{key})", "scope #{scope.inspect} is not a non-empty JSON object")
+          quarantine("#{@model.table_name}(#{key})", "scope #{scope.inspect} is not a non-empty JSON object")
           return false
         end
         return true if Scope.canonical(Scope.parse(scope)) == scope
 
-        quarantine("dials(#{key})", "scope #{scope.inspect} is not canonical")
+        quarantine("#{@model.table_name}(#{key})", "scope #{scope.inspect} is not canonical")
         false
       rescue JSON::ParserError, InvalidScope
-        quarantine("dials(#{key})", "scope #{scope.inspect} is not a valid canonical scope")
+        quarantine("#{@model.table_name}(#{key})", "scope #{scope.inspect} is not a valid canonical scope")
         false
       end
 

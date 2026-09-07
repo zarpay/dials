@@ -6,37 +6,11 @@ require "dials/active_record"
 class ActiveRecordStoreTest < Minitest::Test
   include DialsTestSupport
 
-  def self.establish_schema!
-    return if @schema_ready
-
-    ActiveRecord::Base.establish_connection(adapter: "sqlite3", database: ":memory:")
-    ActiveRecord::Schema.verbose = false
-    # Mirrors lib/generators/dials/install/templates/migration.rb.tt.
-    # :zar_dials is the same shape under a prefixed name, for the
-    # config.table_name_prefix tests.
-    ActiveRecord::Schema.define do
-      %i[dials zar_dials].each do |name|
-        create_table name do |t|
-          t.string :key, null: false, limit: 100
-          t.string :scope, null: false, limit: 255
-          t.bigint :seq, null: false
-          t.string :action, null: false
-          t.text :value
-          t.string :actor_type
-          t.string :actor_id
-          t.string :actor_label
-          t.datetime :created_at, null: false
-        end
-        add_index name, %i[key scope seq], unique: true
-        add_index name, :key
-      end
-    end
-    @schema_ready = true
-  end
-
   def setup
     super
-    self.class.establish_schema!
+    # :zar_dials is the same shape under a prefixed name, for the
+    # config.table_name_prefix tests.
+    DialsTestSupport.sqlite_schema!(:dials, :zar_dials)
     Dials::ActiveRecord::Entry.delete_all
     Dials.configure { |c| c.store = :active_record }
     define_standard_dials

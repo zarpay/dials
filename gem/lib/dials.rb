@@ -20,6 +20,7 @@ require_relative "dials/change_record"
 require_relative "dials/actor"
 require_relative "dials/stores/memory"
 require_relative "dials/config"
+require_relative "dials/namespace"
 require_relative "dials/testing"
 
 # Dials: operator-adjustable values with per-scope overrides.
@@ -42,15 +43,18 @@ require_relative "dials/testing"
 # The key-taking primitives (get, set, clear) stay public underneath — they
 # are the dynamic-access layer for code that receives the key at runtime
 # (an admin surface iterating the registry, a console one-liner).
+#
+# Every method here belongs to the DEFAULT namespace (see Namespace): the
+# app's own dials, in the app's own table. A subsystem that owns its
+# settings end to end declares a namespace of its own instead:
+#
+#   Transfers = Dials.namespace(:transfers) { |config| config.store = :active_record }
+#
+# and gets the same API on that object, against a table of its own.
 module Dials
-  # Thread-local marker: this thread performed a dial write inside a
-  # database transaction that is still open. While set, the thread's reads
-  # come from fresh, UNPUBLISHED snapshots — it sees its own uncommitted
-  # write, but the uncommitted value never lands in the shared cache (where
-  # other threads would read it, and where it would survive a rollback).
-  TXN_WRITE_KEY = :dials_wrote_in_open_transaction
-
-  CACHE_LOCK = Mutex.new
+  # Guards @namespaces: engine initializers declare at boot, in an order the
+  # app does not control.
+  NAMESPACE_LOCK = Mutex.new
 
   # The stale-write token of an override that is not stored. Pass it as
   # `expected_version:` to assert "there was no override here when I looked"
@@ -58,9 +62,76 @@ module Dials
   ABSENT_VERSION = StoreVersion::ABSENT
 
   class << self
-    # -- declaration ---------------------------------------------------------
+    # -- namespaces ----------------------------------------------------------
 
-    attr_reader :registry, :config
+    # The root namespace, the one every method on this module delegates to.
+    attr_reader :default
+
+    # Every namespace, root first, then registration order — what an admin
+    # surface iterates to group dials by subsystem without naming one.
+    def namespaces
+      @namespaces.values
+    end
+
+    # Declare a namespace (with a block or a label), or fetch one by name:
+    #
+    #   Transfers = Dials.namespace(:transfers, label: "Transfers") do |config|
+    #     config.store = :active_record        # table: "transfers_dials"
+    #   end
+    #
+    #   Dials.namespace(:transfers)            # the same object, later
+    #
+    # Options the block leaves alone inherit the root's config. Declaring a
+    # name twice raises DuplicateNamespace; fetching one that was never
+    # declared raises UnknownNamespace.
+    def namespace(name, label: nil, &block)
+      key = name.to_sym
+      return fetch_namespace(key, name) if label.nil? && block.nil?
+
+      NAMESPACE_LOCK.synchronize { assert_undeclared!(key) }
+      namespace = Namespace.new(key, label: label, parent: default)
+
+      # The block runs application code (it can build a store, touch
+      # ActiveRecord, even declare dials), so it runs outside the lock — and
+      # before the namespace is published, so no other thread can reach one
+      # that is still on the inherited store.
+      namespace.configure(&block) if block
+      NAMESPACE_LOCK.synchronize do
+        assert_undeclared!(key)
+        @namespaces[key] = namespace
+      end
+      namespace
+    end
+
+    # Test hook: discard every namespace but the root, and with them their
+    # registries and generated methods. A suite that declares namespaces
+    # needs a blank slate per example.
+    def reset_namespaces!
+      discarded = NAMESPACE_LOCK.synchronize do
+        dropped = @namespaces.except(Namespace::ROOT_NAME).values
+        @namespaces = { Namespace::ROOT_NAME => @default }
+        dropped
+      end
+      @default.forget_children!
+      discarded.each { |namespace| Thread.current[namespace.txn_write_key] = nil }
+    end
+
+    # Force every namespace's next read to rebuild from its store, and clear
+    # every in-transaction-write marker — one call for a test suite that
+    # wraps examples in transactions.
+    def reload_all!
+      namespaces.each(&:reload!)
+    end
+
+    # -- the default namespace -----------------------------------------------
+
+    def registry
+      default.registry
+    end
+
+    def config
+      default.config
+    end
 
     # Declare dials:
     #
@@ -75,245 +146,84 @@ module Dials
     # reader), adjust_merchant_fee_bps, clear_merchant_fee_bps (see
     # Generated).
     def define(&)
-      registry.instance_eval(&)
+      default.define(&)
     end
 
-    # -- configuration -------------------------------------------------------
-
-    def configure
-      yield config
+    def configure(&)
+      default.configure(&)
     end
 
     def store
-      config.store
+      default.store
     end
 
     def cache
-      @cache || CACHE_LOCK.synchronize { @cache ||= Cache.new(store: store, ttl: config.cache_ttl) }
+      default.cache
     end
 
-    # Discard the cache object entirely (used when the store is swapped).
     def reset_cache!
-      CACHE_LOCK.synchronize { @cache = nil }
+      default.reset_cache!
     end
 
-    # Force the next read to rebuild from the store — e.g. after writing
-    # through a console in another process, or in a test. Also clears this
-    # thread's in-transaction-write marker (test suites that wrap examples
-    # in transactions call this between examples).
     def reload!
-      Thread.current[TXN_WRITE_KEY] = nil
-      cache.bust!
+      default.reload!
     end
 
-    # -- reads ---------------------------------------------------------------
-
-    # Resolve a dial by key — the primitive under the generated readers,
-    # for callers that receive the key at runtime. Scope is passed
-    # as keyword arguments and must name every dimension the dial declares —
-    # no more, no less:
-    #
-    #   Dials.get(:signups_enabled)                     # global-only dial
-    #   Dials.get(:merchant_fee_bps, market: "KE")      # varied dial
-    #
-    # Raises UnknownDial / InvalidScope on misuse; never raises for a merely
-    # missing override (that is what defaults are for).
     def get(key, **scope)
-      definition = registry.fetch(key)
-      normalized = Scope.validate!(definition, scope, exact: true)
-
-      # After scope validation, so a test override can never mask a read that
-      # would raise in production.
-      pinned = Testing.override_for(definition.key)
-      return pinned.first if pinned
-
-      Resolver.resolve(definition, normalized, current_snapshot)
+      default.get(key, **scope)
     end
 
-    # Read a dial's Global layer by key: the stored global override when
-    # present, else the code default — the tail every un-overridden scope
-    # falls through to. This is the front door for the caller that has NO
-    # scope to give — resolving a value for a subject whose dimension is
-    # unknowable (a recipient with no resolvable market) — not a way around
-    # exact-scope reads: a caller that knows its scope must still pass it
-    # to get, which raises InvalidScope precisely so a lazy read cannot
-    # skip a scoped override. For a dial with no dimensions this is
-    # equivalent to get. Raises UnknownDial; honors Testing pins.
     def global(key)
-      definition = registry.fetch(key)
-
-      pinned = Testing.override_for(definition.key)
-      return pinned.first if pinned
-
-      # The empty scope matches no stored scoped override, so Resolver
-      # takes exactly the global-override → code-default tail.
-      Resolver.resolve(definition, {}, current_snapshot)
+      default.global(key)
     end
 
-    # One dial's stored scoped overrides as { parsed scope => value }, e.g.
-    # { { market: "BD" } => 24, { market: "NG" } => 48 } — "which markets
-    # override this dial?". Scopes come back as parsed hashes, never
-    # canonical scope strings. A dial with nothing scoped stored (or no
-    # dimensions at all) returns {}; the global override is not included
-    # (see overview). Reads from the same snapshot path as the generated
-    # readers, including the in-transaction rule. The result is deep-frozen —
-    # it shares structure with the process-wide snapshot.
     def scoped_overrides(key)
-      definition = registry.fetch(key)
-      parsed_scoped_overrides(current_snapshot, definition.key)
+      default.scoped_overrides(key)
     end
 
-    # Every registered dial's full state — definition (with its JSON Schema),
-    # global override (explicitly present-or-absent), scoped overrides, and
-    # the per-override stale-write tokens — read from ONE snapshot, so the
-    # picture is coherent. Feed an override's token back as
-    # `expected_version:` when writing it (Dials::ABSENT_VERSION for
-    # overrides the page showed as not stored).
     def overview
-      snapshot = current_snapshot
-      dials = registry.map do |definition|
-        stamps = snapshot.row_versions[definition.key] || {}
-        DialState.new(
-          definition: definition,
-          global_override: snapshot.globals.key?(definition.key),
-          global_value: snapshot.globals[definition.key],
-          global_version: StoreVersion.token(stamps[Scope::GLOBAL] || 0),
-          scoped_overrides: parsed_scoped_overrides(snapshot, definition.key),
-          scoped_override_versions: parsed_versions(snapshot, definition.key)
-        )
-      end.freeze
-      Overview.new(version: StoreVersion.token(snapshot.version), dials: dials)
+      default.overview
     end
 
-    # The full change log, newest first. `key:` filters to one dial.
     def changes(key: nil, limit: 50)
-      key = registry.fetch(key).key if key
-      store.changes(key: key, limit: limit)
+      default.changes(key: key, limit: limit)
     end
 
-    # -- writes --------------------------------------------------------------
-
-    # Store an override by key — the primitive under the generated
-    # adjust_<key> methods. With no scope, overrides the global; with a
-    # scope, creates or updates the override for exactly that scope. The
-    # value is validated against the dial's type and schema; `actor:` is
-    # required and lands in the change log.
-    #
-    # `expected_version:` makes the write compare-and-swap against THIS
-    # override (the global when no scope keywords, the named scoped override
-    # otherwise): pass the override's token from Dials.overview (or a
-    # previous CAS write; Dials::ABSENT_VERSION when the page showed no
-    # override) and the write is refused with StaleWrite — unapplied,
-    # unlogged — if that override has changed since. A CAS write returns the
-    # override's NEW token (chain it into the next write); an unconditional
-    # write returns the value, as always.
     def set(key, value, actor:, scope: nil, expected_version: nil)
-      definition = registry.fetch(key)
-      actor_attrs = Actor.normalize(actor)
-      definition.validate_value!(value)
-
-      if scope.nil? || scope.empty?
-        canonical = Scope::GLOBAL
-      else
-        raise InvalidScope, "dial #{definition.key} declares no dimensions" unless definition.dimensions?
-
-        normalized = Scope.validate!(definition, scope, exact: true)
-        canonical = Scope.canonical(normalized)
-      end
-      _old, written = store.set_override(definition.key, canonical, value, actor_attrs,
-                                         expected_version: expected_version)
-
-      after_write
-      # The token comes from the write we KNOW happened — never from a
-      # second read a concurrent writer could slip in front of.
-      expected_version ? StoreVersion.token(written) : value
+      default.set(key, value, actor: actor, scope: scope, expected_version: expected_version)
     end
 
-    # Remove an override by key — the primitive under the generated
-    # clear_<key> methods — returning resolution to the next layer down: a
-    # cleared scoped override inherits the global; a cleared global inherits the
-    # code default. Returns true if an override existed. Clearing what is not
-    # there is a no-op (and logs nothing).
-    #
-    # `expected_version:` works exactly as on set — the staleness check runs
-    # even when the clear would be a no-op (a page that shows an override
-    # which no longer exists IS stale), and a CAS clear returns the
-    # tombstone's token instead of the boolean (chainable: a later set
-    # carrying it succeeds; an "absent" assertion from an older page does
-    # not — cleared is not the same as never-written).
     def clear(key, actor:, scope: nil, expected_version: nil)
-      definition = registry.fetch(key)
-      actor_attrs = Actor.normalize(actor)
-
-      if scope.nil? || scope.empty?
-        canonical = Scope::GLOBAL
-      else
-        normalized = Scope.validate!(definition, scope, exact: true)
-        canonical = Scope.canonical(normalized)
-      end
-      removed, written = store.clear_override(definition.key, canonical, actor_attrs,
-                                              expected_version: expected_version)
-
-      after_write
-      expected_version ? StoreVersion.token(written) : removed
+      default.clear(key, actor: actor, scope: scope, expected_version: expected_version)
     end
 
     private
 
-    # { canonical scope string => value } from the snapshot, re-keyed by
-    # parsed scope hash. Values are already frozen snapshot references; the
-    # freshly built hashes are frozen so no caller can mutate shared state.
-    def parsed_scoped_overrides(snapshot, key)
-      stored = snapshot.scoped_overrides[key] || {}
-      stored.to_h { |canonical, value| [Freeze.deep(Scope.parse(canonical)), value] }.freeze
-    end
-
-    # { parsed scope hash => version token } for a dial's scoped overrides.
-    def parsed_versions(snapshot, key)
-      stamps = snapshot.row_versions[key] || {}
-      stamps.except(Scope::GLOBAL)
-            .to_h { |canonical, stamp| [Freeze.deep(Scope.parse(canonical)), StoreVersion.token(stamp)] }.freeze
-    end
-
-    def after_write
-      cache.bust!
-      return unless store_transaction_open?
-
-      # The write is inside an application transaction and not committed
-      # yet. Two things follow. This thread's reads must bypass the shared
-      # cache until the transaction closes (see current_snapshot). And the
-      # bust above happened PRE-commit — another thread can legitimately
-      # republish the pre-transaction state before the commit lands — so the
-      # cache must be busted again ON commit, or a writer that never reads
-      # again would leave every process serving the old value until the TTL
-      # probe notices (forever, with ttl = nil). On rollback the hook is
-      # discarded: the shared cache never held the transaction's data.
-      Thread.current[TXN_WRITE_KEY] = true
-      store.after_commit { cache.bust! } if store.respond_to?(:after_commit)
-    end
-
-    def current_snapshot
-      if Thread.current[TXN_WRITE_KEY]
-        return cache.uncached_snapshot if store_transaction_open?
-
-        # The transaction closed (committed or rolled back). Rejoin the
-        # shared cache, busting first so the next snapshot reflects the
-        # outcome rather than anything published mid-transaction.
-        Thread.current[TXN_WRITE_KEY] = nil
-        cache.bust!
+    def fetch_namespace(key, name)
+      NAMESPACE_LOCK.synchronize do
+        @namespaces.fetch(key) do
+          raise UnknownNamespace,
+                "no namespace named #{name.inspect} (declared: #{@namespaces.keys.join(', ')})"
+        end
       end
-
-      cache.snapshot
     end
 
-    def store_transaction_open?
-      s = store
-      s.respond_to?(:transaction_open?) && s.transaction_open?
+    def assert_undeclared!(key)
+      raise DuplicateNamespace, "namespace #{key.inspect} is already declared" if @namespaces.key?(key)
     end
   end
 
-  @registry = Registry.new
-  @config = Config.new
+  @default = Namespace.new(Namespace::ROOT_NAME)
+  @namespaces = { Namespace::ROOT_NAME => @default }
+
+  # The root namespace's in-transaction marker (see Namespace#after_write);
+  # every namespace has one of its own.
+  TXN_WRITE_KEY = @default.txn_write_key
+
+  # The generated readers of the root namespace answer on this module too,
+  # so `Dials.merchant_fee_bps` keeps working: the methods are defined once,
+  # in the namespace's module, and `self` decides whose dials they resolve.
+  extend @default.generated_module
 end
 
 begin
