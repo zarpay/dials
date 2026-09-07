@@ -12,6 +12,16 @@ module Dials
     # The root's table, and the suffix every other namespace's table carries.
     DEFAULT_TABLE_NAME = "dials"
 
+    # A table name reaches the model's table_name and the correlated
+    # NOT EXISTS subquery the store builds by hand, so it must be a plain
+    # unquoted identifier: no reserved-word surprises, no schema
+    # qualification, no case folding.
+    TABLE_NAME_FORMAT = /\A[a-z][a-z0-9_]*\z/
+
+    # PostgreSQL truncates identifiers past 63 bytes, which would silently
+    # merge two tables whose names differ only past the cut.
+    MAX_TABLE_NAME_LENGTH = 63
+
     attr_reader :table_name_prefix
 
     def initialize(namespace, parent: nil)
@@ -22,6 +32,7 @@ module Dials
       @store = nil
       @table_name = nil
       @table_name_prefix = nil
+      claim_table!
     end
 
     # A store instance, or the symbols :memory / :active_record.
@@ -58,12 +69,14 @@ module Dials
     # Both name setters are order-independent with kind=: whichever runs
     # second applies the name.
     def table_name=(name)
-      @table_name = name
+      @table_name = name.to_s
+      claim_table!
       rename_table
     end
 
     def table_name_prefix=(prefix)
       @table_name_prefix = prefix
+      claim_table!
       rename_table
     end
 
@@ -82,6 +95,27 @@ module Dials
     end
 
     private
+
+    # A namespace owns its table outright, so a name it cannot own is a
+    # boot-time error: one that is not a plain identifier would reach raw
+    # SQL, and one another namespace already answers to would interleave two
+    # subsystems' keys, history and stale-write sequences in one stream with
+    # nothing to tell them apart.
+    def claim_table!
+      name = table_name
+      unless TABLE_NAME_FORMAT.match?(name) && name.length <= MAX_TABLE_NAME_LENGTH
+        raise InvalidTableName,
+              "#{name.inspect}: a dials table name must be lowercase letters, digits and " \
+              "underscores, at most #{MAX_TABLE_NAME_LENGTH} characters"
+      end
+
+      claimed = Dials.namespaces.find { |other| !other.equal?(@namespace) && other.config.table_name == name }
+      return unless claimed
+
+      raise InvalidTableName,
+            "namespace #{@namespace.name} would share the #{name.inspect} table with " \
+            "namespace #{claimed.name}; a namespace owns its table (config.table_name)"
+    end
 
     def build_store(kind)
       case kind

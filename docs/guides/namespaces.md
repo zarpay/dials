@@ -53,9 +53,24 @@ the example above. Load order does not matter: an engine can declare its
 namespace before the app configures `Dials`, and options it does not set
 still follow the root.
 
-A name is lowercase letters, digits, and single underscores. It becomes a
-table name and a model class name, and that rule keeps both unique per
-namespace. Anything else raises `Dials::InvalidNamespace`.
+Declare namespaces and configure `Dials` during boot. Reconfiguring while
+the app serves traffic is unsupported: a store swap or a `cache_ttl` change
+propagates to child namespaces and their caches without a lock, so a read or
+a write running at the same moment may see either side of it. Nothing in the
+gem defends that, deliberately — see
+[Design Decisions](/design/decisions).
+
+A name is segments of lowercase letters and digits, each starting with a
+letter, joined by single underscores (`bank_transfer`, `tier2`, not
+`tier_2`). It becomes a table name and a model class name, and that rule is
+what keeps both one-to-one with the namespace. Anything else raises
+`Dials::InvalidNamespace`.
+
+`config.table_name` renames the table. It has the same shape — lowercase
+letters, digits and underscores, at most 63 characters, because it reaches
+raw SQL unquoted and PostgreSQL truncates identifiers past 63 bytes — and no
+two namespaces may resolve to one table. Either raises
+`Dials::InvalidTableName` at boot.
 
 ## What a namespace owns
 

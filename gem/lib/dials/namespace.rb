@@ -24,10 +24,10 @@ module Dials
     ROOT_NAME = :default
 
     # A name becomes a table name and (for an ActiveRecord store) a model
-    # class name, so it is a lowercase identifier with single underscores
-    # between segments: that keeps "flat_rate" -> FlatRateEntry one-to-one,
-    # so two namespaces can never derive the same model.
-    NAME_FORMAT = /\A[a-z][a-z0-9]*(_[a-z0-9]+)*\z/
+    # class name. Every segment starts with a letter, so camelizing the
+    # segments is reversible and two names can never derive one model class:
+    # "flat_rate" -> FlatRateEntry, and nothing else does.
+    NAME_FORMAT = /\A[a-z][a-z0-9]*(_[a-z][a-z0-9]*)*\z/
 
     attr_reader :name, :registry, :config, :txn_write_key
 
@@ -37,8 +37,9 @@ module Dials
     def initialize(name, label: nil, parent: nil)
       @name = name.to_sym
       unless NAME_FORMAT.match?(@name.to_s)
-        raise InvalidNamespace, "#{name.inspect}: a namespace name must be lowercase letters, " \
-                                "digits and single underscores (it becomes a table name)"
+        raise InvalidNamespace, "#{name.inspect}: a namespace name must be lowercase segments of " \
+                                "letters and digits, each starting with a letter, joined by single " \
+                                "underscores (it becomes a table name and a model class name)"
       end
 
       @parent = parent

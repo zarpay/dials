@@ -10,7 +10,21 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_09_01_160000) do
+ActiveRecord::Schema[8.1].define(version: 2026_09_07_120000) do
+  create_table "courier_dials", force: :cascade do |t|
+    t.string "action", null: false
+    t.string "actor_id"
+    t.string "actor_label"
+    t.string "actor_type"
+    t.datetime "created_at", null: false
+    t.string "key", limit: 100, null: false
+    t.string "scope", limit: 255, null: false
+    t.bigint "seq", null: false
+    t.text "value"
+    t.index ["key", "scope", "seq"], name: "index_courier_dials_on_key_and_scope_and_seq", unique: true
+    t.index ["key"], name: "index_courier_dials_on_key"
+  end
+
   create_table "dials", force: :cascade do |t|
     t.string "action", null: false
     t.string "actor_id"

@@ -78,6 +78,35 @@ its namespace — scoped override → global override → code default — becau
 fallback across owners would make "whose default is this?" unanswerable from
 the declaration.
 
+Two namespaces sharing one table is the one failure this shape cannot
+survive: their keys, history and stale-write sequences would interleave in
+the same rows with no discriminator to separate them again. So every way of
+arriving at a table is closed at boot, loudly. A namespace name is segments
+of lowercase letters and digits each starting with a letter, which makes
+camelizing them reversible — `flat_rate` derives `FlatRateEntry` and nothing
+else does, where `flat_1` and `flat1` would both derive `Flat1Entry` and the
+second namespace would silently repoint the first one's model. A table name
+is a plain identifier of at most 63 characters, because it reaches the
+store's hand-built subquery unquoted and PostgreSQL truncates identifiers
+past 63 bytes. And a name that another namespace already answers to raises
+`InvalidTableName` rather than being accepted.
+
+## Configuration is boot-time only
+
+Namespaces are declared and `Dials` is configured during boot; reconfiguring
+while the app serves traffic is unsupported. Configuration propagates
+without locks — a store swap reaches child namespaces and discards their
+caches, a `cache_ttl` change reaches caches already built, and a swap
+between a write and its cache bust can land either way — so a read or write
+running concurrently with a reconfiguration may see either side of it.
+
+Locking those paths would buy nothing an app should want. Configuration is
+an initializer, reviewed and deployed; a process that swaps its store under
+live traffic has a problem no lock in this gem fixes. Saying so is the
+decision: the contract is explicit, and the races are out of scope on
+purpose rather than by omission. What *is* defended is the boundary between
+namespaces, which no configuration order can blur — see above.
+
 ## The log is the state (and also the clock)
 
 The table is **append-only**: every write INSERTs one row, and the newest

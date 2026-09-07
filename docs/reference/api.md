@@ -353,8 +353,22 @@ dial raises `Dials::Error`.
 
 Raises `Dials::DuplicateNamespace` for a name declared twice,
 `Dials::UnknownNamespace` for a fetch of one never declared, and
-`Dials::InvalidNamespace` for a name that is not lowercase letters, digits
-and single underscores (the name becomes a table name).
+`Dials::InvalidNamespace` for a name whose segments are not lowercase
+letters and digits, each starting with a letter, joined by single
+underscores — the name becomes a table name and a model class name, and
+that rule is what keeps both one-to-one with the namespace.
+
+### `config.table_name`
+
+The table a namespace owns. Defaults to `<name>_dials`; the root's is
+`dials` (see `config.table_name_prefix`).
+
+A table name is lowercase letters, digits and underscores, at most 63
+characters — it reaches raw SQL unquoted, and PostgreSQL truncates
+identifiers past 63 bytes. Two namespaces may never resolve to one table:
+sharing one would interleave their keys, history and stale-write sequences
+with nothing to tell them apart. Either raises `Dials::InvalidTableName` at
+boot.
 
 ### `Dials.namespaces → [Namespace]`
 
@@ -452,3 +466,4 @@ All inherit `Dials::Error`:
 | `DuplicateNamespace` | a namespace declared twice |
 | `UnknownNamespace` | a namespace fetched that was never declared |
 | `InvalidNamespace` | a namespace name that is not a lowercase, underscore-separated identifier |
+| `InvalidTableName` | a table name that is not a plain identifier, is over 63 characters, or is already another namespace's |

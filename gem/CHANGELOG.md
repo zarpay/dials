@@ -25,9 +25,21 @@
   `namespaces`, `reload_all!` and `reset_namespaces!`. A dial declared under
   one of those names now raises `InvalidDefinition` at boot instead of at no
   point.
-- A namespace name must be lowercase letters, digits and single underscores
-  (`InvalidNamespace` otherwise): it becomes a table name and a model class
-  name, and that rule keeps both unique per namespace.
+- A namespace name must be segments of lowercase letters and digits, each
+  starting with a letter, joined by single underscores (`InvalidNamespace`
+  otherwise): it becomes a table name and a model class name, and that rule
+  keeps both one-to-one with the namespace. (`tier_2` is refused because it
+  and `tier2` would derive the same model class, and the second namespace
+  would silently repoint the first one's table.)
+- **`Dials::InvalidTableName`.** A table name must be lowercase letters,
+  digits and underscores, at most 63 characters — it reaches raw SQL
+  unquoted, and PostgreSQL truncates identifiers past 63 bytes — and no two
+  namespaces may resolve to one table. Both are checked at boot, on
+  `config.table_name`, `config.table_name_prefix`, and the name a namespace
+  derives from its own.
+- Configuration is boot-time only, now stated as such in the docs: declare
+  namespaces and configure `Dials` during boot, because reconfiguration
+  concurrent with live traffic is unsupported.
 - **`Dials.reload_all!`** reloads every namespace, and
   **`Dials.reset_namespaces!`** discards all but the root — for test suites.
 - The `Dials` module is now the default namespace: `Dials.define`,

@@ -32,8 +32,9 @@ class NamespaceTest < Minitest::Test
 
   def test_a_namespace_name_must_read_as_a_table_name
     # Anything else could derive a table or a model class another namespace
-    # already owns.
-    ["flat rate", "FlatRate", "flat__rate", "shipping_", "_shipping", "1st"].each do |name|
+    # already owns: "flat_1" and "flat1" both camelize to Flat1Entry, so a
+    # segment starting with a digit is refused.
+    ["flat rate", "FlatRate", "flat__rate", "shipping_", "_shipping", "1st", "flat_1"].each do |name|
       assert_raises(Dials::InvalidNamespace, "#{name.inspect} must be refused") do
         Dials.namespace(name, label: "x")
       end
@@ -235,6 +236,27 @@ class NamespaceTest < Minitest::Test
 
     @shipping.configure { |c| c.table_name = "engine_settings" }
     assert_equal "engine_settings", @shipping.config.table_name
+  end
+
+  def test_a_table_name_must_read_as_a_plain_identifier
+    # It reaches the model's table_name and the store's hand-built NOT
+    # EXISTS subquery, neither of which quotes it.
+    ["order table", "Orders", "public.dials", 'dials"; --', "d" * 64].each do |name|
+      assert_raises(Dials::InvalidTableName, "#{name.inspect} must be refused") do
+        @shipping.configure { |c| c.table_name = name }
+      end
+    end
+  end
+
+  def test_two_namespaces_cannot_claim_one_table
+    error = assert_raises(Dials::InvalidTableName) do
+      @payouts.configure { |c| c.table_name = "shipping_dials" }
+    end
+    assert_match(/shipping/, error.message)
+  end
+
+  def test_the_roots_prefix_cannot_claim_a_namespaces_table
+    assert_raises(Dials::InvalidTableName) { Dials.configure { |c| c.table_name_prefix = "shipping_" } }
   end
 
   def test_table_name_prefix_is_the_roots_alone

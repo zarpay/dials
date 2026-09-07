@@ -57,4 +57,10 @@ module Dials
 
   # Raised when a namespace name is not a plain identifier.
   class InvalidNamespace < Error; end
+
+  # Raised when a namespace's table name is not a plain identifier, is
+  # longer than a database will keep whole, or is already another
+  # namespace's table. A namespace owns its table; sharing one would
+  # interleave two subsystems' rows with nothing to tell them apart.
+  class InvalidTableName < Error; end
 end

@@ -213,8 +213,11 @@ module Dials
     end
   end
 
+  # Populated before the root exists: building a namespace asks which
+  # tables are already claimed.
+  @namespaces = {}
   @default = Namespace.new(Namespace::ROOT_NAME)
-  @namespaces = { Namespace::ROOT_NAME => @default }
+  @namespaces[Namespace::ROOT_NAME] = @default
 
   # The root namespace's in-transaction marker (see Namespace#after_write);
   # every namespace has one of its own.

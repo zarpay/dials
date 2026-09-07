@@ -51,7 +51,9 @@ end
 An app with [namespaces](/guides/namespaces) resets all of them with
 `Dials.reload_all!`. A suite that *declares* namespaces per example also
 wants `Dials.reset_namespaces!`, which discards every namespace but the
-root.
+root. Call both from one thread, between examples — like configuration
+itself, the reset hooks assume nothing else is reading or writing dials at
+that moment.
 
 ## The registry-integrity spec
 
