@@ -259,6 +259,18 @@ class NamespaceTest < Minitest::Test
     assert_raises(Dials::InvalidTableName) { Dials.configure { |c| c.table_name_prefix = "shipping_" } }
   end
 
+  def test_a_derived_table_name_cannot_land_on_another_namespaces
+    @shipping.configure { |c| c.table_name = "payments_dials" }
+
+    assert_raises(Dials::InvalidTableName) { Dials.namespace(:payments, label: "Payments") }
+  end
+
+  def test_a_table_name_at_the_length_cap_is_accepted
+    @shipping.configure { |c| c.table_name = "d" * 63 }
+
+    assert_equal "d" * 63, @shipping.config.table_name
+  end
+
   def test_a_refused_name_leaves_the_namespace_on_the_table_it_had
     assert_raises(Dials::InvalidTableName) { @payouts.configure { |c| c.table_name = "shipping_dials" } }
     assert_raises(Dials::InvalidTableName) { Dials.configure { |c| c.table_name_prefix = "shipping_" } }

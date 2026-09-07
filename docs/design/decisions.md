@@ -102,6 +102,13 @@ caches, a `cache_ttl` change reaches caches already built, and a swap
 between a write and its cache bust can land either way — so a read or write
 running concurrently with a reconfiguration may see either side of it.
 
+The reset hooks assume the same quiet moment. `Dials.reset_namespaces!`
+discards namespaces but not the model classes their ActiveRecord stores were
+built from, so a namespace object held across a reset and redeclared under a
+different table name can still be repointed. That is a test hook used
+between examples, on one thread; defending it would mean tracking model
+constants the gem otherwise never has to.
+
 Locking those paths would buy nothing an app should want. Configuration is
 an initializer, reviewed and deployed; a process that swaps its store under
 live traffic has a problem no lock in this gem fixes. The boundary between

@@ -70,7 +70,8 @@ module Admin
     # A namespace answers the same API the Dials module does, so one
     # controller serves the app's dials and every subsystem's.
     def dials
-      params[:namespace].present? ? Dials.namespace(params[:namespace]) : Dials.default
+      name = params[:namespace].to_s
+      name.present? ? Dials.namespace(name) : Dials.default
     end
 
     def dial_key

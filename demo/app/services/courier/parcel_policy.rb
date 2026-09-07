@@ -12,9 +12,5 @@ module Courier
     def accepts?(weight_kg)
       weight_kg <= CourierDials.max_parcel_kg(market: @market)
     end
-
-    def support_email
-      CourierDials.support_email
-    end
   end
 end

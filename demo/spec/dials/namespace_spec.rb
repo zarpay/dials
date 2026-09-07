@@ -7,7 +7,7 @@ require "rails_helper"
 RSpec.describe "Dial namespaces", type: :model do
   let(:actor) { AdminUser.new(id: 77, email: "ops@bazario.example") }
 
-  it "lists the root first, then declaration order" do
+  it "lists both namespaces, root first, each owning its own registry" do
     expect(Dials.namespaces.map(&:name)).to eq(%i[default courier])
     expect(Dials.namespaces.map(&:label)).to eq(["Dials", "Courier"])
     expect(Dials.namespace(:courier)).to be(CourierDials)

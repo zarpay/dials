@@ -174,8 +174,11 @@ RSpec.describe "Admin dials API", type: :request do
       expect(response.parsed_body.sole["new_value"]).to eq(30)
     end
 
-    it "404s an unknown namespace" do
+    it "404s an unknown namespace, whatever shape the param arrives in" do
       get "/admin/dials", params: { namespace: "nope" }, headers: headers
+      expect(response).to have_http_status(:not_found)
+
+      get "/admin/dials", params: { namespace: ["courier"] }, headers: headers
       expect(response).to have_http_status(:not_found)
     end
 
