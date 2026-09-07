@@ -5,7 +5,6 @@ AllCops:
   UseCache: false
   Exclude:
     - "vendor/**/*"
-    - "tmp/**/*"
 
 Layout/LineLength:
   Enabled: false

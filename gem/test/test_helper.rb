@@ -2,10 +2,6 @@
 
 $LOAD_PATH.unshift File.expand_path("../lib", __dir__)
 
-# Rails apps load active_support before any initializer requires dials; the
-# generator tests need railties on the load path, and its railtie only loads
-# in that order.
-require "active_support"
 require "dials"
 require "minitest/autorun"
 
