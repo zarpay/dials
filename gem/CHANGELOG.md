@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.4.0] - 2026-09-09
 
 - **Namespaces.** A subsystem can own its dials:
   `Dials.namespace(:shipping) { |config| config.store = :active_record }`
