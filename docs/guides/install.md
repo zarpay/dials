@@ -27,7 +27,7 @@ used verbatim — include the trailing underscore, as with Rails'
 `table_name_prefix`:
 
 ```bash
-bin/rails generate dials:install --table-name-prefix=zar_   # creates zar_dials
+bin/rails generate dials:install --table-name-prefix=ops_   # creates ops_dials
 ```
 
 ## 2. Configure and declare

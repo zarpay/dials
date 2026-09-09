@@ -17,7 +17,7 @@ module Dials
       source_root File.expand_path("templates", __dir__)
 
       class_option :table_name_prefix, type: :string, default: "",
-                   desc: 'Prefix for the gem-owned table, used verbatim ("zar_" creates zar_dials)'
+                   desc: 'Prefix for the gem-owned table, used verbatim ("ops_" creates ops_dials)'
 
       def create_migration_file
         migration_template "migration.rb.tt", "db/migrate/create_#{table_name}_table.rb"

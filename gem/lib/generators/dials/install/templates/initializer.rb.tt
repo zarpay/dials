@@ -11,8 +11,8 @@ Dials.configure do |config|
 <% if options[:table_name_prefix].empty? -%>
   # Prefix the gem-owned table when "dials" collides with an existing one.
   # Used verbatim, so include the trailing underscore. Must match the
-  # migration (`rails g dials:install --table-name-prefix=zar_`).
-  # config.table_name_prefix = "zar_"
+  # migration (`rails g dials:install --table-name-prefix=ops_`).
+  # config.table_name_prefix = "ops_"
 <% else -%>
   # Names the gem-owned table <%= table_name %>, as created by the install
   # migration.

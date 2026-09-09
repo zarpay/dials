@@ -145,4 +145,46 @@ RSpec.describe "Admin dials API", type: :request do
       expect(history.last["scope"]).to be_nil
     end
   end
+
+  # One controller serves every namespace: the `namespace` param picks which
+  # one, and the index lists them so a page can offer a subsystem picker.
+  describe "namespaces" do
+    it "lists every namespace alongside the app's own dials" do
+      get "/admin/dials", headers: headers
+
+      body = response.parsed_body
+      expect(body["namespace"]).to eq("default")
+      expect(body["namespaces"]).to eq([{ "name" => "default", "label" => "Dials" },
+                                        { "name" => "courier", "label" => "Courier" }])
+      expect(body["dials"].map { |d| d["key"] }).not_to include("max_parcel_kg")
+    end
+
+    it "reads and writes a namespace's own dials, against its own table" do
+      get "/admin/dials", params: { namespace: "courier" }, headers: headers
+      expect(response.parsed_body["dials"].map { |d| d["key"] }).to match_array(%w[max_parcel_kg support_email])
+
+      put "/admin/dials/max_parcel_kg",
+          params: { value: 30, scope: { market: "KE" }, namespace: "courier" }.to_json, headers: headers
+      expect(response).to have_http_status(:no_content)
+
+      expect(CourierDials.max_parcel_kg(market: "KE")).to eq(30)
+      expect(Dials::ActiveRecord::Entry.count).to eq(0)
+
+      get "/admin/dials/max_parcel_kg/changes", params: { namespace: "courier" }, headers: headers
+      expect(response.parsed_body.sole["new_value"]).to eq(30)
+    end
+
+    it "404s an unknown namespace, whatever shape the param arrives in" do
+      get "/admin/dials", params: { namespace: "nope" }, headers: headers
+      expect(response).to have_http_status(:not_found)
+
+      get "/admin/dials", params: { namespace: ["courier"] }, headers: headers
+      expect(response).to have_http_status(:not_found)
+    end
+
+    it "404s a dial that belongs to another namespace" do
+      put "/admin/dials/max_parcel_kg", params: { value: 30 }.to_json, headers: headers
+      expect(response).to have_http_status(:not_found)
+    end
+  end
 end

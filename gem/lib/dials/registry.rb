@@ -1,33 +1,35 @@
 # frozen_string_literal: true
 
 module Dials
-  # The in-code catalog of every dial the application declares. A key's
-  # presence here is what makes it a dial at all: reads, writes, and scope
-  # validation all consult the registry, and an admin surface renders exactly
-  # these entries.
+  # The in-code catalog of every dial a namespace declares. A key's presence
+  # here is what makes it a dial at all: reads, writes, and scope validation
+  # all consult the registry, and an admin surface renders exactly these
+  # entries.
   #
   # Declarations accumulate across `Dials.define` blocks (so large apps can
   # split declarations by domain), but a key declared twice raises — a dial's
-  # declaration is its single source of truth.
+  # declaration is its single source of truth. A key is unique inside its
+  # namespace only: two namespaces may each declare :timeout_seconds.
   class Registry
     include Enumerable
 
-    def initialize
+    def initialize(namespace)
+      @namespace = namespace
       @definitions = {}
       @mutex = Mutex.new
     end
 
     # DSL entry point used by `Dials.define { dial ... }`. Registering a key
-    # also generates its per-dial methods (the Dials.<key> reader and the
-    # adjust_/clear_ writers);
-    # Generated.install! checks for name collisions before defining anything,
-    # so a raise here leaves neither a definition nor a stray method behind.
+    # also generates its per-dial methods on the namespace (the reader and
+    # the adjust_/clear_ writers); the namespace checks for name collisions
+    # before defining anything, so a raise here leaves neither a definition
+    # nor a stray method behind.
     def dial(key, **)
       definition = Definition.new(key, **)
       @mutex.synchronize do
         raise DuplicateDial, "dial #{definition.key} is already defined" if @definitions.key?(definition.key)
 
-        Generated.install!(definition)
+        @namespace.install_generated!(definition)
         @definitions[definition.key] = definition
       end
       definition
@@ -61,7 +63,7 @@ module Dials
     def reset!
       @mutex.synchronize do
         @definitions.clear
-        Generated.uninstall_all!
+        @namespace.uninstall_generated!
       end
     end
   end

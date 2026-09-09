@@ -1,5 +1,62 @@
 # Changelog
 
+## [Unreleased]
+
+- **Namespaces.** A subsystem can own its dials:
+  `Dials.namespace(:shipping) { |config| config.store = :active_record }`
+  returns a dials instance of its own — its own registry, config, store,
+  table (`shipping_dials`), cache, change log, generated readers and test
+  overrides. A key is unique inside its namespace, so two namespaces may
+  declare the same one, and a dial resolves inside its namespace only.
+  `Dials.namespaces` lists every namespace (root first) for an admin surface
+  that groups dials by subsystem, and `Dials.default` names the root.
+  Unset options (`cache_ttl`, `actor_label`, `default_actor`) inherit the
+  root's config; `store` inherits by kind, so an inheriting namespace still
+  owns its table (a store *object* is not inheritable — sharing one would
+  put two namespaces in one key space). `config.table_name` renames a namespace's table;
+  `config.table_name_prefix` still names the root's.
+- **Newly reserved dial keys.** A dial's reader must not shadow a method on
+  its namespace, and the namespace object carries methods the `Dials` module
+  did not: `label`, `with_overrides`, `default_label`, `root?`, `storage`,
+  `txn_write_key`, `generated_module`, `install_generated!`,
+  `uninstall_generated!`, `apply_cache_ttl`, `apply_store`,
+  `inherit_cache_ttl`, `inherit_store`, `adopt`, `forget_children!` and
+  `reset_config!` — plus the new module methods `default`, `namespace`,
+  `namespaces`, `reload_all!` and `reset_namespaces!`. A dial declared under
+  one of those names now raises `InvalidDefinition` at boot instead of at no
+  point.
+- A namespace name must be segments of lowercase letters and digits, each
+  starting with a letter, joined by single underscores (`InvalidNamespace`
+  otherwise): it becomes a table name and a model class name, and that rule
+  keeps both one-to-one with the namespace. (`tier_2` is refused because it
+  and `tier2` would derive the same model class, and the second namespace
+  would silently repoint the first one's table.)
+- **`Dials::InvalidTableName`.** A table name must be lowercase letters,
+  digits and underscores, at most 63 characters — a table the namespace owns
+  outright, not a schema-qualified or case-sensitive reference, and
+  PostgreSQL truncates identifiers past 63 bytes — and no two namespaces may
+  resolve to one table. Both are checked at boot, on `config.table_name`,
+  `config.table_name_prefix`, and the name a namespace derives from its own.
+- The ActiveRecord store quotes the table name in the one query it writes by
+  hand, so a table named for a reserved word (`order`) loads state instead of
+  raising a SQL syntax error on the first read.
+- Configuration is boot-time only: declare namespaces and configure `Dials`
+  during boot. Reconfiguration concurrent with live traffic is unsupported.
+- **`Dials.reload_all!`** reloads every namespace, and
+  **`Dials.reset_namespaces!`** discards all but the root — for test suites.
+- The `Dials` module is now the default namespace: `Dials.define`,
+  `Dials.configure`, the generated readers, `Dials::Testing.with_overrides`,
+  `Dials.reload!` and `Dials::ActiveRecord::Entry` behave exactly as before.
+  Internals moved with the refactor, none of them documented API:
+  `Dials::Testing::THREAD_KEY` and `Dials::Testing.override_for` are gone
+  (each namespace keeps its own thread-local pins); `Dials::CACHE_LOCK` and
+  `Stores::ActiveRecordStore::Entry` are gone (the store now takes
+  `model:`); `Dials::ActiveRecord::Entry` subclasses a new abstract
+  `Dials::ActiveRecord::Record`, and its `DEFAULT_TABLE_NAME` moved to the
+  new `Dials::Storage`, which owns a namespace's store kind, table and
+  model; `Dials::Actor.normalize`, `Registry.new` and `Config.new` now take
+  the namespace (or its config and storage) they act for.
+
 ## [0.3.0] - 2026-09-07
 
 - **`Dials.global(key)`.** Read a dial's Global layer by key: the stored

@@ -53,6 +53,7 @@ export default defineConfig({
           { text: 'Retrofit a Constant', link: '/guides/retrofit-a-constant' },
           { text: 'Retrofit an Admin Table', link: '/guides/retrofit-an-admin-table' },
           { text: 'Build a Write Surface', link: '/guides/build-a-write-surface' },
+          { text: 'Namespaces', link: '/guides/namespaces' },
           { text: 'Testing with Dials', link: '/guides/testing' },
         ],
       },

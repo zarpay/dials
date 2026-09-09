@@ -25,6 +25,10 @@ Properties worth knowing:
   test override can't mask a call-site bug.
 - `false` pins fine — kill-switch specs work.
 
+A namespace pins its own dials through itself:
+`Shipping.with_overrides(max_parcel_kg: 5) { ... }`. A pin on one namespace
+does not change what another returns.
+
 Prefer `with_overrides` for consumer specs. Reach for real `adjust_*` writes
 only when the *dial layer itself* is what you're testing (resolution,
 history, the write surface).
@@ -43,6 +47,15 @@ end
 ```
 
 (Minitest: `Dials.reload!` in your base-class `setup`.)
+
+An app with [namespaces](/guides/namespaces) resets all of them with
+`Dials.reload_all!`. A suite that *declares* namespaces per example also
+wants `Dials.reset_namespaces!`, which discards every namespace but the
+root. Call both from one thread, between examples — like configuration
+itself, the reset hooks assume nothing else is reading or writing dials at
+that moment. A namespace object a reset discarded is finished: keep reading
+through `Dials.namespace(:name)` rather than a constant captured in an
+earlier example.
 
 ## The registry-integrity spec
 

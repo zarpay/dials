@@ -26,10 +26,11 @@ override returns resolution to the layer below. Full argument in
 
 ## One table of overrides
 
-Storage is one table, and (see the next section) it is append-only: every
-override is a stream of rows keyed by `(key, scope)`, where the global
-override is the stream at the **empty scope**, stored as its canonical
-encoding `"{}"`.
+Storage is one table per [namespace](/guides/namespaces) — one for the whole
+app, unless a subsystem declares its own — and (see the next section) it is
+append-only: every override is a stream of rows keyed by `(key, scope)`,
+where the global override is the stream at the **empty scope**, stored as
+its canonical encoding `"{}"`.
 
 The alternative — a parent `dials` row per key with scoped rows hanging off
 an FK — adds protection this gem cannot use, at the cost of ongoing
@@ -58,6 +59,61 @@ textual under the column collation (canonical encoding makes gem writes
 safe; MySQL's case-insensitive defaults mean dimension options shouldn't
 differ only by case), and the composite index carries explicit column limits
 (key 100, scope 255) to stay inside every supported database's index budget.
+
+## A namespace owns a table
+
+A subsystem that needs an operator knob should not have to put its rows in
+the host app's table, and should not have to give up types, bounds,
+attribution and history to avoid that. So a namespace is a dials instance of
+its own: its own registry, config, store, table, cache and change log.
+
+Why not one table with a `namespace` column? Because then every reader has to
+filter correctly to stay isolated, a subsystem cannot move to its own
+database without a data migration, and "who owns this row" is a convention
+instead of a schema fact. One table per namespace makes the boundary the same
+in every layer: registry, cache, table.
+
+A namespace does not get cross-namespace resolution. A dial resolves inside
+its namespace — scoped override → global override → code default — because a
+fallback across owners would make "whose default is this?" unanswerable from
+the declaration.
+
+Two namespaces sharing one table is the one failure this shape cannot
+survive: their keys, history and stale-write sequences would interleave in
+the same rows with no discriminator to separate them again. So every way of
+arriving at a table is checked at boot. A namespace name is segments
+of lowercase letters and digits each starting with a letter, which makes
+camelizing them reversible — `flat_rate` derives `FlatRateEntry` and nothing
+else does, where `flat_1` and `flat1` would both derive `Flat1Entry` and the
+second namespace would silently repoint the first one's model. A table name
+is a plain identifier of at most 63 characters, so it names a table the
+namespace owns outright rather than a schema-qualified or case-sensitive
+reference, and PostgreSQL cannot truncate two of them into one. A name
+another namespace already answers to raises `InvalidTableName`. The one
+query the gem writes by hand quotes the table name through the adapter, so a
+reserved word is a table like any other.
+
+## Configuration is boot-time only
+
+Namespaces are declared and `Dials` is configured during boot; reconfiguring
+while the app serves traffic is unsupported. Configuration propagates
+without locks — a store swap reaches child namespaces and discards their
+caches, a `cache_ttl` change reaches caches already built, and a swap
+between a write and its cache bust can land either way — so a read or write
+running concurrently with a reconfiguration may see either side of it.
+
+The reset hooks assume the same quiet moment. `Dials.reset_namespaces!`
+discards namespaces but not the model classes their ActiveRecord stores were
+built from, so a namespace object held across a reset and redeclared under a
+different table name can still be repointed. That is a test hook used
+between examples, on one thread; defending it would mean tracking model
+constants the gem otherwise never has to.
+
+Locking those paths would buy nothing an app should want. Configuration is
+an initializer, reviewed and deployed; a process that swaps its store under
+live traffic has a problem no lock in this gem fixes. The boundary between
+namespaces is defended instead, and no configuration order can blur it —
+see above.
 
 ## The log is the state (and also the clock)
 

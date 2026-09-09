@@ -10,6 +10,10 @@ module Admin
   #   DELETE /admin/dials/:key       clear an override { scope:, expected_version: }
   #   GET    /admin/dials/:key/changes  attributed history
   #
+  # Namespaces: every action takes an optional `namespace` param and acts on
+  # that namespace, defaulting to the app's own. The index also lists every
+  # namespace, so the page can offer a subsystem picker without naming one.
+  #
   # Attribution: the authenticated admin is passed as actor: on every write.
   # Validation: the gem raises typed errors; they render as 422/404/409 here.
   #
@@ -26,7 +30,7 @@ module Admin
   # the primitives exist for. Application code with the dial in hand uses the
   # generated forms (see app/services).
   class DialsController < ApplicationController
-    rescue_from Dials::UnknownDial, with: -> { head :not_found }
+    rescue_from Dials::UnknownDial, Dials::UnknownNamespace, with: -> { head :not_found }
     rescue_from Dials::InvalidValue, Dials::InvalidScope, Dials::MissingActor do |error|
       render json: { error: error.message }, status: :unprocessable_content
     end
@@ -35,31 +39,40 @@ module Admin
     end
 
     def index
-      overview = Dials.overview
+      overview = dials.overview
       render json: {
         version: overview.version, # informational "rendered as of" stamp
         absent_version: Dials::ABSENT_VERSION,
+        namespace: dials.name,
+        namespaces: Dials.namespaces.map { |ns| { name: ns.name, label: ns.label } },
         dials: overview.dials.map { |state| present(state) }
       }
     end
 
     def update
-      result = Dials.set(dial_key, value_param, scope: scope_param, actor: current_admin,
+      result = dials.set(dial_key, value_param, scope: scope_param, actor: current_admin,
                                                 expected_version: expected_version_param)
       write_response(result)
     end
 
     def destroy
-      result = Dials.clear(dial_key, scope: scope_param, actor: current_admin,
+      result = dials.clear(dial_key, scope: scope_param, actor: current_admin,
                            expected_version: expected_version_param)
       write_response(result)
     end
 
     def changes
-      render json: Dials.changes(key: dial_key).map(&:to_h)
+      render json: dials.changes(key: dial_key).map(&:to_h)
     end
 
     private
+
+    # A namespace answers the same API the Dials module does, so one
+    # controller serves the app's dials and every subsystem's.
+    def dials
+      name = params[:namespace].to_s
+      name.present? ? Dials.namespace(name) : Dials.default
+    end
 
     def dial_key
       params[:key].to_sym

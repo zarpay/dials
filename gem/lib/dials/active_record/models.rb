@@ -2,17 +2,17 @@
 
 module Dials
   module ActiveRecord
-    # The one gem-owned table. Values are stored as JSON text (not jsonb)
-    # so the schema is portable across PostgreSQL, MySQL, and SQLite; nothing
+    # One namespace's table. Values are stored as JSON text (not jsonb) so
+    # the schema is portable across PostgreSQL, MySQL, and SQLite; nothing
     # ever queries inside a value or a scope — reads go through the
     # in-process cache, so the database is durable storage, not a query
     # surface.
     #
-    # This model is internal plumbing for Stores::ActiveRecordStore.
-    # Application code reads and writes through the Dials facade, which is
-    # where validation, attribution, and cache busting live. Writing to it
-    # directly bypasses all of that.
-
+    # These models are internal plumbing for Stores::ActiveRecordStore.
+    # Application code reads and writes through a namespace (the Dials
+    # facade is the default one), which is where validation, attribution,
+    # and cache busting live. Writing to them directly bypasses all of that.
+    #
     # One row per WRITE — the table is append-only, so the change log IS the
     # state. The newest row per (key, scope) stream is the current override:
     # action "set" carries the value; action "clear" says the override is
@@ -33,12 +33,8 @@ module Dials
     # collation additionally treats scopes differing only by case ("KE" vs
     # "ke") as one stream — don't declare dimension enums that differ only
     # by case, or give the table a binary collation.
-    class Entry < ::ActiveRecord::Base
-      # Prefixable via Dials.configure { |c| c.table_name_prefix = "zar_" }
-      # for apps where "dials" collides with an existing table (see
-      # Config#table_name_prefix).
-      DEFAULT_TABLE_NAME = "dials"
-      self.table_name = DEFAULT_TABLE_NAME
+    class Record < ::ActiveRecord::Base
+      self.abstract_class = true
 
       validates :key, :scope, :seq, presence: true
       validates :action, presence: true, inclusion: { in: %w[set clear] }
@@ -50,6 +46,20 @@ module Dials
       def readonly?
         persisted?
       end
+    end
+
+    # The default namespace's table; renamed by Config#table_name_prefix.
+    class Entry < Record
+      self.table_name = Dials::Storage::DEFAULT_TABLE_NAME
+    end
+
+    # The model for a non-default namespace, named after it so a validation
+    # error or a query log says which subsystem's table it is.
+    def self.model(namespace_name)
+      const = "#{namespace_name.to_s.split('_').map(&:capitalize).join}Entry"
+      return const_get(const, false) if const_defined?(const, false)
+
+      const_set(const, Class.new(Record))
     end
   end
 end

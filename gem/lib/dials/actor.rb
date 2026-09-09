@@ -13,8 +13,8 @@ module Dials
   module Actor
     module_function
 
-    def normalize(actor)
-      actor = default_actor if actor.nil?
+    def normalize(actor, config)
+      actor = default_actor(config) if actor.nil?
       if actor.nil?
         raise MissingActor, "every write requires an actor: (who is making this change?) — " \
                             "pass actor:, or set config.default_actor for apps without user identity"
@@ -23,14 +23,14 @@ module Dials
       {
         actor_type: actor_type(actor),
         actor_id: actor_id(actor),
-        actor_label: Dials.config.actor_label.call(actor).to_s
+        actor_label: config.actor_label.call(actor).to_s
       }
     end
 
     # The configured fallback; a callable is evaluated per write (so
     # `-> { ENV.fetch("USER", "console") }` names whoever runs the console).
-    def default_actor
-      configured = Dials.config.default_actor
+    def default_actor(config)
+      configured = config.default_actor
       configured.respond_to?(:call) ? configured.call : configured
     end
 

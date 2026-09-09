@@ -14,15 +14,16 @@ Declares one dial (inside a `define` block). Raises
 constraint keyword doesn't apply to the type, the default fails its own
 schema, or a generated method name is already taken.
 
-Each declaration generates the dial's three methods on `Dials`: the bare
-`<key>` reader, `adjust_<key>`, and `clear_<key>` (see below). They are
-defined at declaration time — real methods, not `method_missing`. Because
-the reader is the bare name, a dial cannot share a name with a `Dials`
-method (`:store`, `:cache`, `:changes`, ...) — that raises at boot.
+Each declaration generates the dial's three methods on its namespace
+(`Dials` itself, for the default one): the bare `<key>` reader,
+`adjust_<key>`, and `clear_<key>` (see below). They are defined at
+declaration time — real methods, not `method_missing`. Because the reader is
+the bare name, a dial cannot share a name with an existing method on that
+namespace (`:store`, `:cache`, `:changes`, ...) — that raises at boot.
 
 | Argument | Type | Required | Notes |
 |---|---|---|---|
-| `key` | Symbol/String | yes | unique across the app; the only positional argument |
+| `key` | Symbol/String | yes | unique inside its namespace; the only positional argument |
 | `default:` | value | yes | the code default; validated like any stored value |
 | `type:` | Symbol | yes | `:boolean` `:integer` `:float` `:string` `:json` |
 | `label:` | String | no | defaults to the humanized key |
@@ -274,28 +275,30 @@ Dials.configure do |config|
   config.cache_ttl = 5.0               # seconds; 0 = probe every read; nil = never
   config.actor_label = ->(actor) { }   # change-log label builder
   config.default_actor = nil           # fallback attribution; see below
-  config.table_name_prefix = nil       # "zar_" names the table zar_dials; see below
+  config.table_name_prefix = nil       # "ops_" names the root's table ops_dials; see below
 end
 ```
 
 ### `config.table_name_prefix`
 
-Prefix for the gem-owned table, when `dials` collides with an existing
-table. Used verbatim — include the trailing underscore, as with Rails'
+Prefix for the **default** namespace's table, when `dials` collides with an
+existing table. Used verbatim — include the trailing underscore, as with Rails'
 `table_name_prefix`:
 
 ```ruby
-config.table_name_prefix = "zar_"   # the table is zar_dials
+config.table_name_prefix = "ops_"   # the table is ops_dials
 ```
 
 The migration must create the matching table; pass the same prefix to the
 install generator so both stay in step:
 
 ```bash
-bin/rails generate dials:install --table-name-prefix=zar_
+bin/rails generate dials:install --table-name-prefix=ops_
 ```
 
-`nil` (the default) keeps `dials`.
+`nil` (the default) keeps `dials`. Every other namespace names its table
+with `config.table_name` instead — setting `table_name_prefix` on one
+raises `Dials::Error`.
 
 ### `config.default_actor`
 
@@ -319,13 +322,107 @@ Discard this process's snapshot; the next read rebuilds from the store.
 Needed after writes that bypass the gem, and in test suites (see
 [Testing](/guides/testing)).
 
+## Namespaces
+
+A namespace is a dials instance of its own: its own registry, config, store,
+table, cache and change log. `Dials` is the default one (name `:default`),
+and every method on the module reads and writes through it. See
+[Namespaces](/guides/namespaces) for what a namespace owns, what it inherits,
+and when to declare one.
+
+### `Dials.namespace(name, label: nil, &block) → Namespace`
+
+Declares a namespace when you pass a block or a `label:`. Fetches the one
+already declared under that name when you pass neither.
+
+```ruby
+Shipping = Dials.namespace(:shipping, label: "Shipping") do |config|
+  config.store = :active_record      # table: "shipping_dials"
+  config.table_name = "other_name"   # optional; renames the table
+  config.label = "Shipping"          # same as the label: argument
+end
+
+Dials.namespace(:shipping)           # the same object, later
+```
+
+Options the block leaves alone (`cache_ttl`, `actor_label`, `default_actor`)
+read through to the root's config. `store` inherits by *kind*, so an
+inheriting namespace still owns its own table; a store *object* is never
+inherited, and a namespace under one must name its own store or reading a
+dial raises `Dials::Error`.
+
+Raises `Dials::DuplicateNamespace` for a name declared twice,
+`Dials::UnknownNamespace` for a fetch of one never declared, and
+`Dials::InvalidNamespace` for a name whose segments are not lowercase
+letters and digits, each starting with a letter, joined by single
+underscores — the name becomes a table name and a model class name, and
+that rule is what keeps both one-to-one with the namespace.
+
+### `config.table_name`
+
+The table a namespace owns. Defaults to `<name>_dials`; the root's is
+`dials` (see `config.table_name_prefix`). `nil` restores the derived name.
+
+A table name is lowercase letters, digits and underscores, at most 63
+characters, and no two namespaces may resolve to one table. Either raises
+`Dials::InvalidTableName` at boot.
+
+### `Dials.namespaces → [Namespace]`
+
+Every namespace, root first, then declaration order. An admin page walks it
+to group dials by subsystem:
+
+```ruby
+Dials.namespaces.map { |ns| [ns.name, ns.label, ns.overview.dials] }
+```
+
+### `Dials.default → Namespace`
+
+The root namespace, named explicitly.
+
+### The namespace API
+
+Everything documented above, on the namespace object:
+
+```ruby
+ns.name                 # :shipping
+ns.label                # "Shipping" (config.label; the root's is "Dials")
+ns.define { dial ... }
+ns.configure { |config| ... }
+ns.registry / ns.config / ns.store / ns.cache
+ns.max_parcel_kg                                       # generated reader
+ns.adjust_max_parcel_kg(30, actor:, expected_version:) # generated writer
+ns.clear_max_parcel_kg(actor:, expected_version:)      # generated clear
+ns.get / ns.set / ns.clear / ns.scoped_overrides
+ns.overview             # one snapshot of this namespace's dials
+ns.changes(key: nil, limit: 50)                        # its own log only
+ns.with_overrides(max_parcel_kg: 5) { ... }            # thread-local pin
+ns.reload! / ns.reset_cache!
+```
+
+A dial resolves inside its namespace: there is no cross-namespace fallback,
+and two namespaces may declare the same key.
+
 ## Testing
 
 ### `Dials::Testing.with_overrides(hash, &block)`
 
 Thread-local, validated, nestable value pinning for the block's duration.
 Applies to every scope of each pinned dial; never touches store, cache, or
-log.
+log. It pins the default namespace. Another namespace pins its own dials
+through itself (`Shipping.with_overrides(...)`), and a pin on one namespace
+does not change what another returns.
+
+### `Dials.reload_all!`
+
+`reload!` for every namespace: one call for a suite that wraps examples in
+transactions.
+
+### `Dials.reset_namespaces!`
+
+Test hook: discards every namespace but the root, and with them their
+registries and generated methods. Use it in a suite that declares namespaces
+and wants a blank slate per example.
 
 ## Stores
 
@@ -341,9 +438,13 @@ the write itself, never a second read). Shipped: `Stores::Memory` (default) and
 
 ```bash
 bin/rails generate dials:install
+bin/rails generate dials:install --table-name-prefix=ops_   # table: ops_dials
 ```
 
-Creates the three-table migration and `config/initializers/dials.rb`.
+Creates the migration for the gem-owned table and
+`config/initializers/dials.rb`. A [namespace](/guides/namespaces) is not
+generated — it needs one table like this one and a few lines in an
+initializer.
 
 ## Errors
 
@@ -359,3 +460,7 @@ All inherit `Dials::Error`:
 | `MissingActor` | write without `actor:` and no `config.default_actor` declared |
 | `StaleWrite` | `expected_version:` no longer matches the targeted override — unapplied, unlogged |
 | `WriteConflict` | concurrent unconditional writes to one override outran the store's retries (effectively never) |
+| `DuplicateNamespace` | a namespace declared twice |
+| `UnknownNamespace` | a namespace fetched that was never declared |
+| `InvalidNamespace` | a namespace name whose segments are not lowercase letters and digits, each starting with a letter |
+| `InvalidTableName` | a table name that is not a plain identifier, is over 63 characters, or is already another namespace's |
